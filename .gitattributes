@@ -1,0 +1,38 @@
+# Line-ending normalisation.
+#
+# Text files are stored LF in the repository and checked out LF everywhere,
+# including Windows. Without this the working tree depends on each clone's
+# core.autocrlf setting, so the same file differs between machines and a
+# formatter that enforces LF fights the checkout on every commit.
+#
+# Applying this renormalises files whose stored form is currently CRLF. Run
+# `git add --renormalize .` once, in its own commit.
+* text=auto eol=lf
+
+# cmd.exe requires CRLF in batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF or they fail on Linux and macOS with ^M errors.
+*.sh text eol=lf
+
+# gettext catalogues are text; keep them LF so translation diffs stay readable.
+*.po text eol=lf
+*.pot text eol=lf
+
+# Binary assets: never convert, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+
+# Collapse the lockfile in GitLab merge request diffs; it is generated output.
+uv.lock -diff linguist-generated=true gitlab-generated=true

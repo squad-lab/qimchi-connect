@@ -60,6 +60,9 @@ quantify = [
     "quantify-core>=0.7",
 ]
 
+[project.scripts]
+qimchi-connect = "qimchi_connect.cli:main"
+
 [build-system]
 requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"

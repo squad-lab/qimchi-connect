@@ -1,4 +1,7 @@
-"""Package-neutral live xarray transport and discovery for Qimchi."""
+"""
+Package-neutral live xarray-based measurement transport and discovery for Qimchi.
+
+"""
 
 from qimchi_connect.client import (
     get_live_snapshot,
@@ -9,6 +12,18 @@ from qimchi_connect.client import (
     open_live_measurement,
     open_live_measurement_sync,
     send_request,
+)
+from qimchi_connect.producer import (
+    LiveMeasurementRegistration,
+    QCoDeSSnapshotProvider,
+    QCUtilsSnapshotProvider,
+    QuantifySnapshotProvider,
+    close_live_measurement,
+    get_live_registration,
+    live_measurement,
+    register_live_measurement,
+    stop_heartbeat,
+    update_live_disk_path,
 )
 from qimchi_connect.registry import (
     LiveMeasurement,
@@ -36,13 +51,19 @@ from qimchi_connect.server import (
 
 __all__ = [
     "LiveMeasurement",
+    "LiveMeasurementRegistration",
+    "QCUtilsSnapshotProvider",
+    "QCoDeSSnapshotProvider",
+    "QuantifySnapshotProvider",
     "RegistryMaintenanceResult",
     "SnapshotProvider",
     "cleanup_old_measurements",
+    "close_live_measurement",
     "configure_database",
     "end_measurement",
     "get_all_measurements",
     "get_live_measurements",
+    "get_live_registration",
     "get_live_snapshot",
     "get_measurement",
     "get_measurement_data",
@@ -51,15 +72,19 @@ __all__ = [
     "init_database",
     "list_live_measurements",
     "list_live_measurements_sync",
+    "live_measurement",
     "maintain_registry",
     "open_live_measurement",
     "open_live_measurement_sync",
     "reconcile_live_measurements",
+    "register_live_measurement",
     "register_measurement",
     "register_snapshot_provider",
     "send_request",
     "start_live_server",
+    "stop_heartbeat",
     "stop_live_server",
     "unregister_snapshot_provider",
+    "update_live_disk_path",
     "update_measurement_path",
 ]

@@ -9,7 +9,6 @@ image: "python:3.13"
 stages:
   - format
   - test
-  - secret-detection
   - release
 
 include:
@@ -24,7 +23,7 @@ sast:
   stage: test
 
 secret_detection:
-  stage: secret-detection
+  stage: test
 
 lint:
   stage: format

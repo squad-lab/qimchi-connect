@@ -1,0 +1,30 @@
+# Run `uv run pre-commit install` once per clone (after `uv sync --extra dev`).
+#
+# Rules live in pyproject.toml ([tool.ruff]), so these hooks apply exactly the
+# same configuration as a local `ruff check` / `ruff format`.
+#
+# `rev` is pinned to an exact ruff release, and pyproject.toml's `dev` extra and
+# the CI `lint` job pin the same one. Bump all three together, and bump them
+# regularly: ruff ships often, and its formatter output does change between
+# releases.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      # Import sorting is part of `ruff check` via the "I" rules; the formatter
+      # does not do it.
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]

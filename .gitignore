@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Test artefacts
+.uv-cache/
+coverage.xml
+report.xml
+.coverage
+
+# Stray registries
+*.db
+*.db-wal
+*.db-shm
+*.nc

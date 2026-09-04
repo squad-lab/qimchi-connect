@@ -2,6 +2,7 @@
 name = "qimchi-connect"
 version = "0.1.0"
 description = "Publish and discover live xarray datasets in Qimchi"
+readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [

@@ -1,19 +1,216 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/user/application_security/sast/#available-cicd-variables
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/
-# Dependency Scanning customization: https://docs.gitlab.com/user/application_security/dependency_scanning/dependency_scanning_sbom/#customizing-analyzer-behavior
-# Container Scanning customization: https://docs.gitlab.com/user/application_security/container_scanning/#customizing-analyzer-behavior
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ci/variables/#cicd-variable-precedence
+image: "python:3.13"
+
+# Branch model: feature branches -> preview -> main. Everything is linted and
+# tested on every branch, and preview additionally proves the package still
+# builds. Only a merge to main releases: semantic-release reads the commit
+# messages since the last tag, bumps the version, tags it, and publishes to
+# PyPI plus a matching GitLab Release. There are no release candidates.
+
 stages:
-- test
-- secret-detection
+  - format
+  - test
+  - secret-detection
+  - release
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+variables:
+  SECRET_DETECTION_ENABLED: "true"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+
 sast:
   stage: test
-include:
-- template: Security/SAST.gitlab-ci.yml
-- template: Security/Secret-Detection.gitlab-ci.yml
-variables:
-  SECRET_DETECTION_ENABLED: 'true'
+
 secret_detection:
   stage: secret-detection
+
+lint:
+  stage: format
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+    # Pinned to the exact release .pre-commit-config.yaml and pyproject.toml's
+    # `dev` extra use. Bump all three together and do it regularly -- don't
+    # use `ruff@latest` or any of the `*` version specifiers, because a new
+    # release can break the CI.
+    - uv tool install ruff@0.16.6
+  script:
+    - ruff check .
+    - ruff format --check .
+
+pytest:
+  stage: test
+  # 3.13 is the minimum and recommended runtime. 3.14 stays in the matrix as
+  # the forward-compatibility run.
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.13", "3.14"]
+  image: "python:${PYTHON_VERSION}"
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+  script:
+    # The `examples` extra carries qcodes. Without it every test guarded by
+    # `pytest.importorskip("qcodes")` silently SKIPS -- which is the whole
+    # QCoDeSSnapshotProvider suite and the QCoDeS example.
+    - uv sync --python "$PYTHON_VERSION" --extra test --extra examples
+    - uv run --python "$PYTHON_VERSION" pytest --cov --cov-report=term --cov-report=xml --junitxml=report.xml
+  # GitLab reads the total off the pytest-cov terminal summary.
+  coverage: '/^TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  cache:
+    key: uv-$CI_JOB_NAME-$PYTHON_VERSION
+    paths:
+      - .uv-cache
+
+# Windows behaves differently from Linux, so the recommended Python 3.13
+# runtime gets an additional full test run there. Coverage is reported only
+# from Linux to avoid conflicts.
+pytest-windows:
+  stage: test
+  tags:
+    - windows
+  variables:
+    PYTHON_VERSION: "3.13"
+  before_script:
+    - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+  script:
+    - uv sync --python $env:PYTHON_VERSION --extra test --extra examples
+    - uv run --python $env:PYTHON_VERSION pytest --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+  cache:
+    key: uv-$CI_JOB_NAME-$PYTHON_VERSION
+    paths:
+      - .uv-cache
+
+semantic_release:
+  stage: release
+  # Commit-based versioning: the release level comes from the commit messages
+  # since the last tag (fix -> patch, feat -> minor, BREAKING CHANGE -> major).
+  # Commits that do not follow Conventional Commits simply do not trigger a
+  # release, so a change that should ship needs the right prefix.
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  variables:
+    # semantic-release derives the next version from the commits since the last
+    # tag, so it needs the whole history. GitLab shallow-clones by default.
+    GIT_DEPTH: 0
+    GIT_STRATEGY: clone
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
+    # CI checks out a detached HEAD. semantic-release matches the current
+    # branch name against [tool.semantic_release.branches.*] and pushes to it,
+    # so it needs to be on the branch rather than at its commit.
+    - git fetch origin $CI_COMMIT_BRANCH
+    - git checkout $CI_COMMIT_BRANCH
+    - git reset --hard origin/$CI_COMMIT_BRANCH
+    - uv tool install python-semantic-release
+  script:
+    - |
+      RELEASE_TAG="$(semantic-release version --print-tag)"
+      if [ -z "$RELEASE_TAG" ]; then
+        echo "No release-worthy commits; no version will be published."
+        echo "RELEASE_CREATED=false" > release.env
+        exit 0
+      fi
+      echo "RELEASE_CREATED=true" > release.env
+      echo "RELEASE_TAG=$RELEASE_TAG" >> release.env
+      # Bumps pyproject.toml, writes CHANGELOG.md, builds, commits, tags and
+      # pushes. GitLab release creation is deliberately handled by the next
+      # job, whose glab client can authenticate correctly with CI_JOB_TOKEN.
+      semantic-release version --push --changelog --no-vcs-release
+  artifacts:
+    paths:
+      - dist/
+      - CHANGELOG.md
+      - release.env
+    expire_in: never
+    reports:
+      dotenv: release.env
+
+# Creates a GitLab Release for every version cut above. GitLab's supported
+# CI_JOB_TOKEN flow sends a JOB-TOKEN header; assigning that token to
+# GITLAB_TOKEN instead sends a PRIVATE-TOKEN header and the Releases API
+# returns 404. glab's CI auto-login avoids that subtle half-release failure.
+gitlab_release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  needs:
+    - job: semantic_release
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  variables:
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
+  script:
+    - |
+      if [ "$RELEASE_CREATED" != "true" ]; then
+        echo "semantic-release did not cut a version; no GitLab Release needed."
+        exit 0
+      fi
+      # glab gives these variables precedence over CI_JOB_TOKEN. Force the
+      # documented job-token login so an unrelated project variable cannot
+      # silently select a stale or under-scoped personal token.
+      unset GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+      # `glab release create` updates an existing Release, which makes a retry
+      # safe if the first attempt created it before the job was interrupted.
+      glab release create "$RELEASE_TAG" \
+        --name "Release $RELEASE_TAG" \
+        --notes-file CHANGELOG.md \
+        --ref "$RELEASE_TAG"
+
+# Publishes to PyPI whenever semantic_release cut a version on main.
+# PYPI_SPANDAN must exist as a masked, protected CI/CD variable holding the
+# PyPI API token. The job is skipped rather than failed while it is unset, so
+# the pipeline stays green until the variable is added.
+# TODO: Check and remove once integrated
+pypi:
+  stage: release
+  needs:
+    - job: semantic_release
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $PYPI_SPANDAN
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+  script:
+    - |
+      if ! ls dist/*.whl >/dev/null 2>&1; then
+        echo "semantic-release produced no distribution -- nothing to publish."
+        exit 0
+      fi
+    - uv publish --token "$PYPI_SPANDAN"
+
+# preview is the integration branch, so it is the one place a broken build
+# should surface before it reaches main. On main the build is done by
+# semantic_release instead, against the bumped version.
+build_package:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_BRANCH == "preview"
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+  script:
+    - uv build
+  artifacts:
+    paths:
+      - dist/*.tar.gz
+      - dist/*.whl

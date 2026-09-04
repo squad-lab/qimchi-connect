@@ -86,6 +86,24 @@ exclude_also = [
     "if __name__ == .__main__.:",
 ]
 
+[tool.semantic_release]
+# CI sets the version from commit messages. Do not edit the version manually.
+version_toml = ["pyproject.toml:project.version"]
+commit_message = "chore(release): v{version}\n\n[skip ci]"
+build_command = "uv build"
+tag_format = "v{version}"
+# Keep minor releases below 1.0 while the API is unstable.
+major_on_zero = false
+allow_zero_version = true
+
+# Only `main` creates releases. `preview` is tested and built but not tagged.
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = ["^chore\\(release\\):", "^ruff update$"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py313"

@@ -1,10 +1,13 @@
+from pathlib import Path
+
 import pytest
 
-from qimchi_connect import server
+from qimchi_connect import registry, server
 
 
 @pytest.fixture(autouse=True)
-def isolated_live_state():
+def isolated_live_state(tmp_path: Path):
+    registry.configure_database(tmp_path / "live.db")
     server.stop_live_server()
     server._PROVIDERS.clear()
     server._clear_snapshot_cache()
@@ -12,3 +15,4 @@ def isolated_live_state():
     server.stop_live_server()
     server._PROVIDERS.clear()
     server._clear_snapshot_cache()
+    registry.configure_database(None)

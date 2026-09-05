@@ -39,16 +39,16 @@ For a project managed with `uv`:
 uv add qimchi-connect
 ```
 
-To install the latest development version from the `main` branch:
+To install the latest development version from the `preview` branch:
 
 ```console
-pip install "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@main"
+pip install "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@preview"
 ```
 
 For a project managed with `uv`:
 
 ```console
-uv add "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@main"
+uv add "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@preview"
 ```
 
 Qimchi Connect requires Python 3.13 or later. Python 3.13 is recommended, and
@@ -87,11 +87,8 @@ Pass a framework provider to `live_measurement` instead of a callback. A
 provider can prepare the first snapshot, set `source_package`, and derive the
 measurement ID and disk path.
 
-The WebSocket server runs on a background thread. A framework handle may not be
-safe to read from that thread. For example, QCoDeS uses a thread-bound SQLite
-connection and batches writes. Direct calls to
-`datasaver.dataset.to_xarray_dataset()` from the server thread can raise
-`sqlite3.ProgrammingError`, and reads may not include the latest result.
+> [!tip]
+> The WebSocket server runs on a background thread. A framework handle may not be safe to read from that thread. For example, QCoDeS uses a thread-bound SQLite connection and batches writes. Direct calls to `datasaver.dataset.to_xarray_dataset()` from the server thread can raise `sqlite3.ProgrammingError`, and reads may not include the latest result.
 
 `QCoDeSSnapshotProvider` manages the cache, locking, write flushing, and refresh
 rate:
@@ -111,15 +108,6 @@ with meas.run() as datasaver:
 The provider prepares a snapshot before registration and sets the run's
 `source_package`. See `examples/qcodes_measurement.py` for a complete example.
 
-`QCUtilsSnapshotProvider` reads the in-memory Zarr store used by a qcutils
-sweep:
-
-```python
-# qcutils
-from qimchi_connect import QCUtilsSnapshotProvider, register_live_measurement
-
-register_live_measurement(measurement_id, QCUtilsSnapshotProvider(memory_store))
-```
 
 `QuantifySnapshotProvider` derives the measurement ID and disk path from a
 tuid. It retries when `dataset.hdf5` is not yet readable at the start of a run.
@@ -132,6 +120,16 @@ from qimchi_connect import QuantifySnapshotProvider, live_measurement
 live = QuantifySnapshotProvider(tuid)
 with live_measurement(live.measurement_id, live, disk_path=live.disk_path):
     MC.run(experiment_name)
+```
+
+`QCUtilsSnapshotProvider` reads the in-memory Zarr store used by a qcutils
+sweep:
+
+```python
+# QCUtils
+from qimchi_connect import QCUtilsSnapshotProvider, register_live_measurement
+
+register_live_measurement(measurement_id, QCUtilsSnapshotProvider(memory_store))
 ```
 
 See [Adding a framework](CONTRIBUTING.md#adding-a-framework) to support another

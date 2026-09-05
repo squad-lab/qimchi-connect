@@ -90,6 +90,10 @@ exclude_also = [
 # CI sets the version from commit messages. Do not edit the version manually.
 version_toml = ["pyproject.toml:project.version"]
 commit_message = "chore(release): v{version}\n\n[skip ci]"
+# Without this the release commit is authored by `semantic-release
+# <semantic-release>`, which is not a valid address, so GitLab cannot
+# attribute it. The git identity CI sets does not apply to this commit.
+commit_author = "Janitor <squad@fz-juelich.de>"
 build_command = "uv build"
 tag_format = "v{version}"
 # Keep minor releases below 1.0 while the API is unstable.

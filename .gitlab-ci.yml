@@ -122,8 +122,13 @@ semantic_release:
     - uv tool install python-semantic-release
   script:
     - |
+      # `version --print-tag` always prints a tag and exits 0 -- with nothing
+      # to release it reprints the last one, so testing for empty output never
+      # fires. Comparing it against the last released tag is what detects the
+      # no-op. On the very first release the last tag is empty and they differ.
       RELEASE_TAG="$(semantic-release version --print-tag)"
-      if [ -z "$RELEASE_TAG" ]; then
+      LAST_TAG="$(semantic-release version --print-last-released-tag)"
+      if [ "$RELEASE_TAG" = "$LAST_TAG" ]; then
         echo "No release-worthy commits; no version will be published."
         echo "RELEASE_CREATED=false" > release.env
         exit 0

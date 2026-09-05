@@ -1,8 +1,8 @@
 # Qimchi Connect
 
-[![pipeline](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?key_text=pipeline&key_width=60)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
-[![tests](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?job=pytest&key_text=tests&key_width=40)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
-[![coverage](https://gitlab.com/squad-lab/qimchi-connect/badges/main/coverage.svg?job=pytest&key_text=coverage&key_width=64)](https://gitlab.com/squad-lab/qimchi-connect/-/jobs)
+[![pipeline](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?ignore_skipped=true&key_text=pipeline&key_width=60)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
+[![tests](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?job=pytest%3A%20%5B3.13%5D&ignore_skipped=true&key_text=tests&key_width=40)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
+[![coverage](https://gitlab.com/squad-lab/qimchi-connect/badges/main/coverage.svg?key_text=coverage&key_width=64)](https://gitlab.com/squad-lab/qimchi-connect/-/jobs)
 [![latest release](https://gitlab.com/squad-lab/qimchi-connect/-/badges/release.svg?key_text=release&key_width=54)](https://gitlab.com/squad-lab/qimchi-connect/-/releases)
 
 `qimchi-connect` publishes real-time `xarray.Dataset` snapshots to Qimchi without

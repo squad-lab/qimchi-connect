@@ -4,6 +4,7 @@
 [![tests](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?job=pytest%3A%20%5B3.13%5D&ignore_skipped=true&key_text=tests&key_width=40)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
 [![coverage](https://gitlab.com/squad-lab/qimchi-connect/badges/main/coverage.svg?key_text=coverage&key_width=64)](https://gitlab.com/squad-lab/qimchi-connect/-/jobs)
 [![latest release](https://gitlab.com/squad-lab/qimchi-connect/-/badges/release.svg?key_text=release&key_width=54)](https://gitlab.com/squad-lab/qimchi-connect/-/releases)
+[![PyPI version](https://img.shields.io/pypi/v/qimchi-connect)](https://pypi.org/project/qimchi-connect/)
 
 `qimchi-connect` publishes real-time `xarray.Dataset` snapshots to Qimchi without
 requiring a specific measurement framework or storage format.

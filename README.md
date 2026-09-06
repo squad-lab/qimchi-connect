@@ -10,7 +10,7 @@
 requiring a specific measurement framework or storage format.
 
 To publish a measurement, provide a callback that returns the current
-`xarray.Dataset`. Built-in providers support QCoDeS, qcutils, and Quantify.
+`xarray.Dataset`. Built-in providers support QCoDeS, qanary, and Quantify.
 
 ---
 
@@ -123,15 +123,19 @@ with live_measurement(live.measurement_id, live, disk_path=live.disk_path):
     MC.run(experiment_name)
 ```
 
-`QCUtilsSnapshotProvider` reads the in-memory Zarr store used by a qcutils
+`QanarySnapshotProvider` reads the in-memory Zarr store used by a qanary
 sweep:
 
 ```python
-# QCUtils
-from qimchi_connect import QCUtilsSnapshotProvider, register_live_measurement
+# Qanary
+from qimchi_connect import QanarySnapshotProvider, register_live_measurement
 
-register_live_measurement(measurement_id, QCUtilsSnapshotProvider(memory_store))
+register_live_measurement(measurement_id, QanarySnapshotProvider(memory_store))
 ```
+
+Qanary was called qcutils up to and including qimchi-connect 0.1.0, where this
+provider was named `QCUtilsSnapshotProvider`. That name was removed. Please import
+`QanarySnapshotProvider` instead.
 
 See [Adding a framework](CONTRIBUTING.md#adding-a-framework) to support another
 framework.
@@ -158,8 +162,8 @@ The examples do not require hardware. All three call
 test for it in that file. `test_every_example_is_covered_by_a_test` checks this
 requirement.
 
-There is no separate qcutils script in this directory because qcutils already
-includes higher-level examples based on `qcutils.measure.run` and `Sweep`.
+There is no separate qanary script in this directory because qanary already
+includes higher-level examples based on `qanary.measure.run` and `Sweep`.
 
 ## Repairing discovery records
 
@@ -173,8 +177,15 @@ Run the same maintenance manually with:
 qimchi-connect cleanup --retention-days 7
 ```
 
-The discovery database is stored at `~/.qcutils/live_measurements.db` for
-compatibility with existing qcutils and Qimchi installations.
+The discovery database is stored in Qimchi's application directory --
+`$QIMCHI_HOME/live_measurements.db`, or `~/.qimchi/live_measurements.db` by
+default. Every producer publishes into the one file Qimchi reads, so it belongs
+with the viewer rather than under any single measurement package.
+
+Up to 0.1.0 it lived at `~/.qcutils/live_measurements.db`. Nothing is migrated:
+the registry only holds live and recently-ended runs and repopulates as soon as
+producers publish again, so upgrade your producers and Qimchi together and
+delete the old `~/.qcutils` afterwards.
 
 ## Runtime behavior
 

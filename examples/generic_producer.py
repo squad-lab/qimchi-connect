@@ -1,6 +1,6 @@
 """
 Publish a live xarray dataset to Qimchi from a framework-neutral acquisition
-loop -- no QCoDeS, qcutils, or Quantify required.
+loop -- no QCoDeS, qanary, or Quantify required.
 
 Run with:  python examples/generic_producer.py
 

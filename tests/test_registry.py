@@ -111,7 +111,7 @@ def test_cleanup_rejects_a_negative_retention():
 
 
 def test_the_registry_round_trips_a_measurement_through_its_lifecycle():
-    """Register, look up, move on disk, then end -- the qcutils sequence."""
+    """Register, look up, move on disk, then end -- the qanary sequence."""
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     registry.register_measurement(
         "old", "/tmp/old.nc", "ws://localhost:9000", 9000, started
@@ -129,18 +129,48 @@ def test_the_registry_round_trips_a_measurement_through_its_lifecycle():
     assert registry.LiveMeasurement is registry.LiveMeasurement
 
 
-def test_the_default_registry_lives_beside_the_qcutils_one(monkeypatch, tmp_path):
+def test_the_default_registry_lives_in_qimchis_home(monkeypatch, tmp_path):
     """
-    The path is shared with qcutils on purpose, so an existing install keeps
-    discovering the same measurements.
+    Every producer publishes into the one file Qimchi reads, so the registry
+    belongs in Qimchi's home rather than any single producer's.
 
     """
+    monkeypatch.delenv("QIMCHI_HOME", raising=False)
     monkeypatch.setattr(registry.Path, "home", staticmethod(lambda: tmp_path))
     registry.configure_database(None)
 
     path = registry.get_database_path()
 
-    assert path == tmp_path / ".qcutils" / "live_measurements.db"
+    assert path == tmp_path / ".qimchi" / "live_measurements.db"
+    assert path.parent.is_dir()
+
+
+def test_qimchi_home_moves_the_registry(monkeypatch, tmp_path):
+    """
+    ``QIMCHI_HOME`` is what Qimchi itself honours, so a moved home has to move
+    the registry too -- otherwise the viewer and its producers disagree.
+
+    """
+    home = tmp_path / "elsewhere"
+    monkeypatch.setenv("QIMCHI_HOME", str(home))
+    registry.configure_database(None)
+
+    path = registry.get_database_path()
+
+    assert path == home / "live_measurements.db"
+    assert path.parent.is_dir()
+
+
+def test_qimchi_home_expands_the_user_directory(monkeypatch, tmp_path):
+    """Producer and viewer must resolve a tilde-prefixed override equally."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("QIMCHI_HOME", "~/elsewhere")
+    registry.configure_database(None)
+
+    path = registry.get_database_path()
+
+    assert path == tmp_path / "elsewhere" / "live_measurements.db"
     assert path.parent.is_dir()
 
 

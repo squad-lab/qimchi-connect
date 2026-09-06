@@ -2232,7 +2232,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },
-    { name = "qcodes", marker = "extra == 'examples'", specifier = ">=0.42" },
+    { name = "qcodes", marker = "extra == 'examples'", specifier = ">=0.59.0" },
     { name = "quantify-core", marker = "extra == 'quantify'", specifier = ">=0.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.6" },
     { name = "websockets", specifier = ">=17.1,<18" },

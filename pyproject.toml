@@ -53,7 +53,7 @@ dev = [
 # Required by the QCoDeS example and tests. CI installs this extra so the tests
 # use QCoDeS instead of skipping it.
 examples = [
-    "qcodes>=0.42",
+    "qcodes>=0.59.0",
 ]
 # Required by QuantifySnapshotProvider. Its tests use a fake module and do not
 # require this extra.

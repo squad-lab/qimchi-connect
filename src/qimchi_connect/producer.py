@@ -209,11 +209,11 @@ class QCoDeSSnapshotProvider:
             return self._snapshot
 
 
-class QCUtilsSnapshotProvider:
+class QanarySnapshotProvider:
     """
-    Snapshot provider for a running qcutils measurement.
+    Snapshot provider for a running qanary measurement.
 
-    qcutils keeps its live data in an in-memory Zarr store that the sweep
+    qanary keeps its live data in an in-memory Zarr store that the sweep
     writes to as it goes. This reads the current contents of that store on
     every call, so a client always sees the run so far.
 
@@ -224,7 +224,7 @@ class QCUtilsSnapshotProvider:
 
     #: Producer metadata applied when the caller does not pass its own.
     metadata: Mapping[str, Any] = {
-        "source_package": "qcutils",
+        "source_package": "qanary",
         "source_format": "zarr",
     }
 

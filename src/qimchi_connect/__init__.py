@@ -15,8 +15,8 @@ from qimchi_connect.client import (
 )
 from qimchi_connect.producer import (
     LiveMeasurementRegistration,
+    QanarySnapshotProvider,
     QCoDeSSnapshotProvider,
-    QCUtilsSnapshotProvider,
     QuantifySnapshotProvider,
     close_live_measurement,
     get_live_registration,
@@ -52,8 +52,8 @@ from qimchi_connect.server import (
 __all__ = [
     "LiveMeasurement",
     "LiveMeasurementRegistration",
-    "QCUtilsSnapshotProvider",
     "QCoDeSSnapshotProvider",
+    "QanarySnapshotProvider",
     "QuantifySnapshotProvider",
     "RegistryMaintenanceResult",
     "SnapshotProvider",

@@ -1,7 +1,7 @@
 """
 Tests for publishing and closing a measurement by identifier.
 
-A producer whose publish and close happen in different places -- qcutils
+A producer whose publish and close happen in different places -- qanary
 registers in ``run()`` and closes in a ``finally`` on another method -- can
 address an open publication by its identifier instead of carrying the handle
 between them or keeping its own mapping.
@@ -15,7 +15,7 @@ import pytest
 import xarray as xr
 
 from qimchi_connect import (
-    QCUtilsSnapshotProvider,
+    QanarySnapshotProvider,
     close_live_measurement,
     get_live_registration,
     register_live_measurement,
@@ -35,9 +35,9 @@ def store():
     return memory_store
 
 
-class TestQCUtilsSnapshotProvider:
+class TestQanarySnapshotProvider:
     def test_it_reads_the_current_contents_of_the_store(self, store):
-        assert QCUtilsSnapshotProvider(store)()["signal"].values.tolist() == [
+        assert QanarySnapshotProvider(store)()["signal"].values.tolist() == [
             0.0,
             1.0,
             2.0,
@@ -45,7 +45,7 @@ class TestQCUtilsSnapshotProvider:
 
     def test_it_sees_writes_made_after_construction(self, store):
         """The sweep keeps writing; every call re-reads."""
-        provider = QCUtilsSnapshotProvider(store)
+        provider = QanarySnapshotProvider(store)
         first = provider()["signal"].size
 
         xr.Dataset(
@@ -55,24 +55,24 @@ class TestQCUtilsSnapshotProvider:
         assert first == 3
         assert provider()["signal"].size == 6
 
-    def test_it_describes_itself_as_qcutils_zarr(self, store):
-        with register_live_measurement("m", QCUtilsSnapshotProvider(store)) as handle:
+    def test_it_describes_itself_as_qanary_zarr(self, store):
+        with register_live_measurement("m", QanarySnapshotProvider(store)) as handle:
             entry = server._provider_entry(handle.measurement_id)
             assert entry.metadata == {
-                "source_package": "qcutils",
+                "source_package": "qanary",
                 "source_format": "zarr",
             }
 
     def test_an_explicit_metadata_argument_still_wins(self, store):
         with register_live_measurement(
-            "m", QCUtilsSnapshotProvider(store), metadata={"source_package": "mine"}
+            "m", QanarySnapshotProvider(store), metadata={"source_package": "mine"}
         ):
             assert server._provider_entry("m").metadata["source_package"] == "mine"
 
 
 class TestIdAddressedOperations:
     def test_an_open_publication_is_resolvable_by_id(self, store):
-        registration = register_live_measurement("m", QCUtilsSnapshotProvider(store))
+        registration = register_live_measurement("m", QanarySnapshotProvider(store))
 
         assert get_live_registration("m") is registration
 
@@ -80,7 +80,7 @@ class TestIdAddressedOperations:
         assert get_live_registration("never-published") is None
 
     def test_closing_by_id_stops_serving_and_ends_the_record(self, store):
-        register_live_measurement("m", QCUtilsSnapshotProvider(store))
+        register_live_measurement("m", QanarySnapshotProvider(store))
 
         assert close_live_measurement("m") is True
 
@@ -92,13 +92,13 @@ class TestIdAddressedOperations:
         assert close_live_measurement("never-published") is False
 
     def test_closing_twice_is_harmless(self, store):
-        register_live_measurement("m", QCUtilsSnapshotProvider(store))
+        register_live_measurement("m", QanarySnapshotProvider(store))
 
         assert close_live_measurement("m") is True
         assert close_live_measurement("m") is False
 
     def test_the_disk_path_can_be_updated_by_id(self, store, tmp_path):
-        register_live_measurement("m", QCUtilsSnapshotProvider(store))
+        register_live_measurement("m", QanarySnapshotProvider(store))
         final = tmp_path / "m.nc"
 
         assert update_live_disk_path("m", final) is True
@@ -124,7 +124,7 @@ class TestMaintenanceLogging:
         )
 
         with caplog.at_level("INFO", logger="qimchi_connect.producer"):
-            register_live_measurement("m", QCUtilsSnapshotProvider(store))
+            register_live_measurement("m", QanarySnapshotProvider(store))
 
         assert "marked 1 stale and deleted 2" in caplog.text
 
@@ -138,7 +138,7 @@ class TestMaintenanceLogging:
             original = producer_module.registry.maintain_registry
             producer_module.registry.maintain_registry = explode
             try:
-                register_live_measurement("m", QCUtilsSnapshotProvider(store))
+                register_live_measurement("m", QanarySnapshotProvider(store))
             finally:
                 producer_module.registry.maintain_registry = original
 

@@ -7,7 +7,7 @@ license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
   { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
-  { name = "Jyotirmaya Shivottam", email = "jyotirmaya.shivottam@niser.ac.in" },
+  { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
 ]
 keywords = ["quantum", "measurement", "live", "xarray", "websockets", "qimchi"]
 classifiers = [
@@ -20,7 +20,7 @@ classifiers = [
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=1.26",
-    # QCUtilsSnapshotProvider reads an in-memory Zarr store. qcutils also
+    # QanarySnapshotProvider reads an in-memory Zarr store. qanary also
     # depends on Zarr.
     "zarr>=2.18",
     # websockets 16 logs a full traceback when a timed-out probe disconnects
@@ -34,6 +34,7 @@ Homepage = "https://gitlab.com/squad-lab/qimchi-connect"
 Repository = "https://gitlab.com/squad-lab/qimchi-connect"
 Issues = "https://gitlab.com/squad-lab/qimchi-connect/-/issues"
 Qimchi = "https://gitlab.com/squad-lab/qimchi"
+"SQUAD Lab" = "https://squad-lab.org/"
 
 [project.optional-dependencies]
 test = [
@@ -105,6 +106,19 @@ allow_zero_version = true
 match = "main"
 prerelease = false
 
+# preview is the release train: it is built and tested, never released. Cutting
+# release candidates from it later only needs this entry to exist.
+[tool.semantic_release.branches.preview]
+match = "preview"
+prerelease = true
+prerelease_token = "rc"
+
+# Without this, python-semantic-release assumes GitHub and every commit link it
+# writes into CHANGELOG.md points at github.com/squad-lab/qimchi-connect -- a 404.
+[tool.semantic_release.remote]
+type = "gitlab"
+domain = "gitlab.com"
+
 [tool.semantic_release.changelog]
 exclude_commit_patterns = ["^chore\\(release\\):", "^ruff update$"]
 
@@ -124,3 +138,8 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["qimchi_connect"]
+
+# The repository stores LF. Without this, `ruff format` on Windows rewrites
+# every touched file to CRLF and git re-normalises it on the next commit.
+[tool.ruff.format]
+line-ending = "lf"

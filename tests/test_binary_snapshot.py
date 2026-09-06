@@ -3,7 +3,7 @@ Tests for the binary snapshot wire format.
 
 ``snapshot_payload(dataset, binary=True)`` moves numeric and boolean arrays
 out of the JSON body and into a raw byte blob (``pack_snapshot`` /
-``unpack_snapshot``). The round trip is exact for every dtype qcutils
+``unpack_snapshot``). The round trip is exact for every dtype qanary
 produces, the framed message is smaller than the JSON one, and a truncated
 message raises.
 
@@ -25,7 +25,7 @@ from qimchi_connect.protocol import (
 
 
 def _measurement_shaped_dataset(size: int = 40) -> xr.Dataset:
-    """A dataset shaped like a live qcutils measurement: 2D float grid, metadata."""
+    """A dataset shaped like a live qanary measurement: 2D float grid, metadata."""
     return xr.Dataset(
         {"signal": (("x", "y"), np.random.default_rng(0).random((size, size)))},
         coords={

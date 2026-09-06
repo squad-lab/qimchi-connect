@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -36,7 +37,7 @@ class LiveMeasurement:
     """
     One row of the live discovery registry.
 
-    Field and column names match the qcutils schema the table was first
+    Field and column names match the qanary schema the table was first
     written with, so an existing ``live_measurements.db`` keeps working.
 
     """
@@ -66,13 +67,20 @@ def get_database_path() -> Path:
     """
     Return the live registry path, creating its parent directory if needed.
 
+    The registry lives in Qimchi's application directory (``QIMCHI_HOME``,
+    ``~/.qimchi`` by default) rather than any producer's, because QCoDeS,
+    Quantify and Qanary producers all publish into the one file Qimchi reads.
+    Honouring ``QIMCHI_HOME`` keeps producer and viewer in step when the home
+    is moved.
+
     Returns:
         Path: SQLite database path.
 
     """
     global _DATABASE_PATH
     if _DATABASE_PATH is None:
-        directory = Path.home() / ".qcutils"
+        home = os.environ.get("QIMCHI_HOME")
+        directory = Path(home).expanduser() if home else Path.home() / ".qimchi"
         directory.mkdir(parents=True, exist_ok=True)
         _DATABASE_PATH = directory / "live_measurements.db"
     return _DATABASE_PATH

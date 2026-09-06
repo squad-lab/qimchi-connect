@@ -1,7 +1,7 @@
 """
 Tests for the JSON encoding layer of the protocol.
 
-Producer metadata and measurement attrs are arbitrary Python: qcutils writes Path
+Producer metadata and measurement attrs are arbitrary Python: qanary writes Path
 objects and timestamps, drivers write NumPy scalars, and complex amplitudes
 appear in the data itself. ``json_compatible`` converts those ahead of time and
 ``json_default`` catches whatever reached the encoder unconverted, so both are

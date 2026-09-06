@@ -113,7 +113,8 @@ class TestGetData:
         assert set(data) == {"signal"}
 
     def test_a_variable_request_omits_the_producer_metadata(self, published):
-        """``source`` describes the measurement, so it rides the structure
+        """
+        ``source`` describes the measurement, so it rides the structure
         response rather than every value fetch."""
         response = asyncio.run(
             server._process_request(

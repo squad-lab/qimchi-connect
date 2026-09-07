@@ -122,6 +122,70 @@ def decode_json_value(value: Any) -> Any:
     return value
 
 
+def append_dim(dataset: xr.Dataset) -> str | None:
+    """
+    Return the dimension a sweep grows along, if the dataset has one.
+
+    That is the first dimension of every data variable. A dataset whose
+    variables disagree about it -- or that has none -- cannot be served in
+    row-wise pieces, and the caller falls back to whole snapshots.
+
+    Args:
+        dataset (xr.Dataset): Dataset to inspect.
+
+    Returns:
+        str | None: The shared leading dimension, or None when there is none.
+
+    """
+    dims = [var.dims for var in dataset.data_vars.values()]
+    if not dims or any(not d for d in dims):
+        return None
+    first = dims[0][0]
+    if any(d[0] != first for d in dims):
+        return None
+    return first
+
+
+def row_frontier(dataset: xr.Dataset, dim: str) -> int:
+    """
+    Return how many leading rows of ``dim`` have been written.
+
+    A producer that preallocates its grid -- as a Qanary sweep does, so the
+    axes are known from the start -- leaves the not-yet-measured tail as NaN.
+    Everything up to the last row holding a finite value is what a consumer
+    could plot, and rows past it carry no information to send.
+
+    A variable whose dtype has no NaN (integers, booleans) cannot be probed
+    this way, so its full length is reported rather than guessing.
+
+    Args:
+        dataset (xr.Dataset): Dataset to inspect.
+        dim (str): Dimension to measure along.
+
+    Returns:
+        int: Number of leading rows written, 0 when nothing has been.
+
+    """
+    total = int(dataset.sizes.get(dim, 0))
+    if total == 0:
+        return 0
+
+    frontier = 0
+    for var in dataset.data_vars.values():
+        if dim not in var.dims:
+            continue
+        if var.dtype.kind not in "fc":
+            return total
+        values = var.transpose(dim, ...).values
+        finite = np.isfinite(values)
+        if finite.ndim > 1:
+            finite = finite.any(axis=tuple(range(1, finite.ndim)))
+        written = np.flatnonzero(finite)
+        if written.size:
+            frontier = max(frontier, int(written[-1]) + 1)
+    return frontier
+
+
 def snapshot_payload(dataset: xr.Dataset, *, binary: bool = False) -> dict[str, Any]:
     """
     Serialize an xarray dataset into the live snapshot representation.

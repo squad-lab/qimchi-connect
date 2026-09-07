@@ -476,7 +476,9 @@ def register_live_measurement(
         measurement_id (str): Stable identifier shown to live-data consumers.
         snapshot (SnapshotProvider | QCoDeSSnapshotProvider): Callback
             returning the current measurement, or a provider that also knows how
-            to seed and describe itself (see ``QCoDeSSnapshotProvider``).
+            to seed and describe itself (see ``QCoDeSSnapshotProvider``). The
+            server takes ownership of each returned dataset, materializes it,
+            and closes its backing resources.
         disk_path (str | Path | None): Optional persisted fallback location.
         metadata (Mapping[str, Any] | None): Optional producer metadata.
             Defaults to the provider's own ``metadata`` when it has one.

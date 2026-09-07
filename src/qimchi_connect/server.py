@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import os
 import socket
 import threading
 import time
@@ -34,12 +36,34 @@ logger = logging.getLogger(__name__)
 
 SnapshotProvider = Callable[[], xr.Dataset]
 
+DEFAULT_SNAPSHOT_CACHE_TTL = 0.25
+
+
+def _configured_snapshot_cache_ttl() -> float:
+    """Read a non-negative snapshot-cache lifetime from the environment."""
+    raw = os.environ.get("QIMCHI_CONNECT_SNAPSHOT_TTL")
+    if raw is None:
+        return DEFAULT_SNAPSHOT_CACHE_TTL
+    try:
+        ttl = float(raw)
+    except ValueError:
+        ttl = math.nan
+    if not math.isfinite(ttl) or ttl < 0:
+        logger.warning(
+            "Ignoring invalid QIMCHI_CONNECT_SNAPSHOT_TTL=%r; using %.2f seconds",
+            raw,
+            DEFAULT_SNAPSHOT_CACHE_TTL,
+        )
+        return DEFAULT_SNAPSHOT_CACHE_TTL
+    return ttl
+
+
 # Requests for one measurement arriving within this window share a single
 # build, so two plots polling the same run cost one serialization rather than
 # two. Consumers poll on independent timers -- Qimchi's plots every 750 ms --
 # so a window narrower than the gap between two of them lets each pay in full.
 # Raising it serves data that much older.
-SNAPSHOT_CACHE_TTL = 0.25
+SNAPSHOT_CACHE_TTL = _configured_snapshot_cache_ttl()
 
 
 @dataclass(frozen=True, slots=True)

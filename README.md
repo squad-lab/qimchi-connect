@@ -230,6 +230,12 @@ modifying a variable.
 Use a lock and return a copy instead of a live buffer. See
 `examples/generic_producer.py`. Use `QCoDeSSnapshotProvider` for QCoDeS.
 
+**Snapshot caching is configurable.** Responses for the same measurement share
+one serialized snapshot for 0.25 seconds by default. Set
+`QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds to tune the
+freshness/serialization tradeoff. Zero disables cache hits. Invalid values are
+ignored with a warning and use the default.
+
 ## Development
 
 ```console

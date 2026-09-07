@@ -2,6 +2,24 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-09-07)
+
+### Chores
+
+- **lock**: Sync the release version
+  ([`cacc6e1`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/cacc6e1f06158c066337a0f3ed7c988f61abc313))
+
+### Features
+
+- Support incremental row snapshots
+  ([`ed3a677`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/ed3a677bbd7578a13f4a4e1813cecf72da71d89f))
+
+### Performance Improvements
+
+- **server**: Make snapshot cache TTL configurable
+  ([`500203f`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/500203f84b2e5e04ae1f70d5fcc81214c8bb8632))
+
+
 ## v0.2.0 (2026-09-06)
 
 ### Chores

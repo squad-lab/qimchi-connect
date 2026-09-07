@@ -28,6 +28,17 @@ DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_TIMEOUT = 30.0
 
 
+def _validate_since_rows(since_rows: int | None) -> int | None:
+    """Validate and normalize an incremental-snapshot row offset."""
+    if since_rows is None:
+        return None
+    if isinstance(since_rows, bool) or not isinstance(since_rows, int):
+        raise TypeError("since_rows must be an integer or None")
+    if since_rows < 0:
+        raise ValueError("since_rows must not be negative")
+    return since_rows
+
+
 async def send_request(
     request: dict[str, Any],
     ws_url: str = DEFAULT_WS_URL,
@@ -114,6 +125,7 @@ async def get_live_snapshot(
     *,
     timeout: float = DEFAULT_TIMEOUT,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    since_rows: int | None = None,
 ) -> dict[str, Any]:
     """
     Fetch one atomic measurement snapshot.
@@ -123,19 +135,29 @@ async def get_live_snapshot(
         ws_url (str): WebSocket endpoint URL.
         timeout (float): Response timeout in seconds.
         connect_timeout (float): Connection and handshake timeout in seconds.
+        since_rows (int | None): Rows the caller already holds. The server
+            answers with the rows beyond that instead of the whole
+            measurement, which is what keeps a long sweep cheap to follow. A
+            server that predates this field ignores it and sends everything,
+            and the response then carries no ``rows_from``.
 
     Returns:
         dict[str, Any]: Snapshot response containing xarray structure and data.
 
     Raises:
         RuntimeError: If the server reports a request failure.
+        TypeError: If ``since_rows`` is not an integer or None.
+        ValueError: If ``since_rows`` is negative.
 
     """
+    since_rows = _validate_since_rows(since_rows)
     request = {
         "action": "get_snapshot",
         "measurement_id": measurement_id,
         "protocol_version": PROTOCOL_VERSION,
     }
+    if since_rows is not None:
+        request["since_rows"] = since_rows
     response = await send_request(
         request, ws_url, timeout=timeout, connect_timeout=connect_timeout
     )
@@ -152,6 +174,7 @@ async def open_live_measurement(
     *,
     timeout: float = DEFAULT_TIMEOUT,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    since_rows: int | None = None,
 ) -> xr.Dataset:
     """
     Load a live measurement in one WebSocket round trip.
@@ -161,21 +184,41 @@ async def open_live_measurement(
         ws_url (str): WebSocket endpoint URL.
         timeout (float): Response timeout in seconds.
         connect_timeout (float): Connection and handshake timeout in seconds.
+        since_rows (int | None): Rows the caller already holds, so only the
+            rows beyond them are fetched.
 
     Returns:
-        xr.Dataset: Current snapshot of the measurement.
+        xr.Dataset: The measurement, or the rows past ``since_rows`` when the
+            server answered with those. When the server supports incremental
+            snapshots, ``encoding["qimchi_connect_rows"]`` says where the
+            returned rows belong -- ``rows_from``, ``rows_written``,
+            ``rows_total`` and ``append_dim``. A full response then has
+            ``rows_from == 0``. The encoding is absent for older servers and
+            datasets that cannot be split row-wise.
 
     Raises:
         RuntimeError: If the server reports a request failure.
+        TypeError: If ``since_rows`` is not an integer or None.
+        ValueError: If ``since_rows`` is negative.
 
     """
     snapshot = await get_live_snapshot(
-        measurement_id, ws_url, timeout=timeout, connect_timeout=connect_timeout
+        measurement_id,
+        ws_url,
+        timeout=timeout,
+        connect_timeout=connect_timeout,
+        since_rows=since_rows,
     )
     dataset = measurement_from_snapshot(snapshot)
     source = snapshot.get("source")
     if isinstance(source, dict):
         dataset.encoding["qimchi_connect_source"] = source
+    if "rows_from" in snapshot:
+        dataset.encoding["qimchi_connect_rows"] = {
+            key: snapshot[key]
+            for key in ("append_dim", "rows_from", "rows_written", "rows_total")
+            if key in snapshot
+        }
     return dataset
 
 
@@ -310,6 +353,7 @@ def open_live_measurement_sync(
     *,
     timeout: float = DEFAULT_TIMEOUT,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    since_rows: int | None = None,
 ) -> xr.Dataset:
     """
     Synchronously load a live measurement.
@@ -319,17 +363,24 @@ def open_live_measurement_sync(
         ws_url (str): WebSocket endpoint URL.
         timeout (float): Response timeout in seconds.
         connect_timeout (float): Connection and handshake timeout in seconds.
+        since_rows (int | None): Rows the caller already holds.
 
     Returns:
-        xr.Dataset: Current snapshot of the measurement.
+        xr.Dataset: As :func:`open_live_measurement`.
 
     Raises:
         RuntimeError: If the server reports a request failure.
+        TypeError: If ``since_rows`` is not an integer or None.
+        ValueError: If ``since_rows`` is negative.
 
     """
     return _run_sync(
         open_live_measurement(
-            measurement_id, ws_url, timeout=timeout, connect_timeout=connect_timeout
+            measurement_id,
+            ws_url,
+            timeout=timeout,
+            connect_timeout=connect_timeout,
+            since_rows=since_rows,
         ),
         timeout + connect_timeout,
     )

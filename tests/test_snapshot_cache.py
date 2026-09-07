@@ -85,6 +85,23 @@ class TestInvalidation:
 
 
 class TestRetention:
+    def test_a_lazy_snapshot_is_materialized_and_closed_before_it_is_cached(self):
+        closed = threading.Event()
+        dataset = xr.Dataset({"a": ("i", np.arange(4, dtype=float))})
+        dataset.set_close(closed.set)
+        server.register_snapshot_provider("lazy", lambda: dataset)
+
+        response = _snapshot("lazy")
+
+        assert closed.is_set()
+        assert _sizes(response) == [0.0, 1.0, 2.0, 3.0]
+        assert server._SNAPSHOT_CACHE["lazy"].dataset["a"].values.tolist() == [
+            0.0,
+            1.0,
+            2.0,
+            3.0,
+        ]
+
     def test_closing_a_measurement_releases_its_cached_snapshot(self):
         """
         A producer process runs many measurements in a row, so a snapshot left

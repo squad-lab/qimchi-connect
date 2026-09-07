@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import os
 import socket
 import threading
 import time
@@ -22,9 +24,11 @@ from qimchi_connect.protocol import (
     MAX_MESSAGE_SIZE,
     PROTOCOL_NAME,
     PROTOCOL_VERSION,
+    append_dim,
     json_compatible,
     json_default,
     pack_snapshot,
+    row_frontier,
     snapshot_payload,
 )
 
@@ -32,7 +36,34 @@ logger = logging.getLogger(__name__)
 
 SnapshotProvider = Callable[[], xr.Dataset]
 
-SNAPSHOT_CACHE_TTL = 0.25
+DEFAULT_SNAPSHOT_CACHE_TTL = 0.25
+
+
+def _configured_snapshot_cache_ttl() -> float:
+    """Read a non-negative snapshot-cache lifetime from the environment."""
+    raw = os.environ.get("QIMCHI_CONNECT_SNAPSHOT_TTL")
+    if raw is None:
+        return DEFAULT_SNAPSHOT_CACHE_TTL
+    try:
+        ttl = float(raw)
+    except ValueError:
+        ttl = math.nan
+    if not math.isfinite(ttl) or ttl < 0:
+        logger.warning(
+            "Ignoring invalid QIMCHI_CONNECT_SNAPSHOT_TTL=%r; using %.2f seconds",
+            raw,
+            DEFAULT_SNAPSHOT_CACHE_TTL,
+        )
+        return DEFAULT_SNAPSHOT_CACHE_TTL
+    return ttl
+
+
+# Requests for one measurement arriving within this window share a single
+# build, so two plots polling the same run cost one serialization rather than
+# two. Consumers poll on independent timers -- Qimchi's plots every 750 ms --
+# so a window narrower than the gap between two of them lets each pay in full.
+# Raising it serves data that much older.
+SNAPSHOT_CACHE_TTL = _configured_snapshot_cache_ttl()
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +88,10 @@ class _SnapshotCacheEntry:
     # The binary-framed message body, built once and shared by every waiter
     # alongside ``payload``.
     blob: bytes
+    # The dataset both were built from, kept so a client asking for only the
+    # rows it is missing can be answered by slicing this rather than by
+    # reading the producer's store again.
+    dataset: xr.Dataset
     metadata: Mapping[str, Any]
     created: float
     # Value of _PROVIDER_EPOCH when the snapshot was built. An entry from an
@@ -116,7 +151,9 @@ def register_snapshot_provider(
     Args:
         measurement_id (str): Stable identifier advertised to live clients.
         snapshot (SnapshotProvider): Callback returning the current
-            measurement as an ``xarray.Dataset``.
+            measurement as an ``xarray.Dataset``. The server materializes and
+            closes the returned object, so the callback must return a snapshot
+            it can hand over rather than the producer's owned dataset.
         metadata (Mapping[str, Any] | None): Optional producer metadata
             included in snapshot responses as ``source``.
 
@@ -208,9 +245,100 @@ def _open_measurement(measurement_id: str) -> tuple[xr.Dataset, Mapping[str, Any
     return dataset, entry.metadata
 
 
+def _row_fields(dataset: xr.Dataset, *, rows_from: int) -> dict[str, Any]:
+    """
+    Describe where a snapshot sits along the dimension a sweep grows on.
+
+    A client stores these beside its copy and asks for ``rows_written``
+    onwards next time, so a run that has already been transferred is not sent
+    again on every poll. A dataset with no shared leading dimension gets no
+    fields, and such a client keeps fetching whole snapshots.
+
+    Args:
+        dataset (xr.Dataset): Dataset being sent.
+        rows_from (int): Index of its first row in the full measurement.
+
+    Returns:
+        dict[str, Any]: Row fields to merge into a snapshot payload.
+
+    """
+    dim = append_dim(dataset)
+    if dim is None:
+        return {}
+    return {
+        "append_dim": dim,
+        "rows_from": rows_from,
+        "rows_written": rows_from + row_frontier(dataset, dim),
+        "rows_total": rows_from + int(dataset.sizes.get(dim, 0)),
+    }
+
+
+def _partial_snapshot(
+    measurement_id: str,
+    dataset: xr.Dataset,
+    metadata: Mapping[str, Any],
+    since_rows: int,
+) -> tuple[dict[str, Any], bytes] | None:
+    """
+    Serialize only the rows a client says it is missing.
+
+    Args:
+        measurement_id (str): Identifier the response is for.
+        dataset (xr.Dataset): Whole current snapshot to slice.
+        metadata (Mapping[str, Any]): Producer metadata for the header.
+        since_rows (int): Rows the client already holds.
+
+    Returns:
+        tuple[dict[str, Any], bytes] | None: Payload and framed message for
+            the missing rows, or None when the whole snapshot should be sent
+            instead -- no shared leading dimension, or a client claiming rows
+            this measurement does not have, which means its copy belongs to a
+            different run.
+
+    """
+    dim = append_dim(dataset)
+    if dim is None:
+        return None
+
+    rows_total = int(dataset.sizes.get(dim, 0))
+    rows_written = row_frontier(dataset, dim)
+    if since_rows > rows_written or since_rows > rows_total:
+        return None
+
+    sliced = dataset.isel({dim: slice(since_rows, rows_written)})
+    payload = snapshot_payload(sliced, binary=True)
+    payload.update(
+        append_dim=dim,
+        rows_from=since_rows,
+        rows_written=rows_written,
+        rows_total=rows_total,
+    )
+    header = dict(payload)
+    header.update(
+        success=True,
+        measurement_id=measurement_id,
+        protocol=PROTOCOL_NAME,
+        protocol_version=PROTOCOL_VERSION,
+        source=json_compatible(dict(metadata)),
+    )
+    return payload, pack_snapshot(header, sliced)
+
+
+def _request_since_rows(request: Mapping[str, Any]) -> int | None:
+    """Return a validated incremental-snapshot offset from a request."""
+    since_rows = request.get("since_rows")
+    if since_rows is None:
+        return None
+    if isinstance(since_rows, bool) or not isinstance(since_rows, int):
+        raise TypeError("since_rows must be an integer or null")
+    if since_rows < 0:
+        raise ValueError("since_rows must not be negative")
+    return since_rows
+
+
 def _build_snapshot(
     measurement_id: str,
-) -> tuple[dict[str, Any], bytes, Mapping[str, Any]]:
+) -> tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]:
     """
     Open a measurement, serialize it, and frame the binary message.
 
@@ -222,12 +350,22 @@ def _build_snapshot(
         measurement_id (str): Identifier to resolve.
 
     Returns:
-        tuple[dict[str, Any], bytes, Mapping[str, Any]]: Snapshot payload, its
-            packed binary message, and producer metadata.
+        tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
+            payload, its packed binary message, the dataset both describe, and
+            producer metadata.
 
     """
     dataset, metadata = _open_measurement(measurement_id)
+    try:
+        # Snapshot callbacks hand ownership of their Dataset to the server.
+        # Materialise lazy backends before closing them so a cached snapshot
+        # never keeps an HDF5/NetCDF file handle open between requests.
+        dataset.load()
+    finally:
+        dataset.close()
+
     payload = snapshot_payload(dataset, binary=True)
+    payload.update(_row_fields(dataset, rows_from=0))
 
     # The blob's JSON header is a full response, not just the snapshot
     # fields: the client reads success, the identifier and `source` out of
@@ -241,12 +379,12 @@ def _build_snapshot(
         protocol_version=PROTOCOL_VERSION,
         source=json_compatible(dict(metadata)),
     )
-    return payload, pack_snapshot(header, dataset), metadata
+    return payload, pack_snapshot(header, dataset), dataset, metadata
 
 
 async def _cached_snapshot(
     measurement_id: str,
-) -> tuple[dict[str, Any], bytes, Mapping[str, Any]]:
+) -> tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]:
     """
     Return a recent snapshot, building at most one per measurement at a time.
 
@@ -259,9 +397,10 @@ async def _cached_snapshot(
         measurement_id (str): Identifier to resolve.
 
     Returns:
-        tuple[dict[str, Any], bytes, Mapping[str, Any]]: Snapshot payload, its
-            packed binary message, and producer metadata. Both are shared
-            between callers and must not be mutated in place.
+        tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
+            payload, its packed binary message, the dataset both describe, and
+            producer metadata. All are shared between callers and must not be
+            mutated in place.
 
     """
     loop = asyncio.get_running_loop()
@@ -278,20 +417,21 @@ async def _cached_snapshot(
             and entry.epoch == epoch
             and time.monotonic() - entry.created < SNAPSHOT_CACHE_TTL
         ):
-            return entry.payload, entry.blob, entry.metadata
+            return entry.payload, entry.blob, entry.dataset, entry.metadata
 
-        payload, blob, metadata = await asyncio.to_thread(
+        payload, blob, dataset, metadata = await asyncio.to_thread(
             _build_snapshot, measurement_id
         )
         if _PROVIDER_EPOCH == epoch:
             _SNAPSHOT_CACHE[measurement_id] = _SnapshotCacheEntry(
                 payload=payload,
                 blob=blob,
+                dataset=dataset,
                 metadata=metadata,
                 created=time.monotonic(),
                 epoch=epoch,
             )
-        return payload, blob, metadata
+        return payload, blob, dataset, metadata
 
 
 def _build_data_payload(
@@ -446,7 +586,14 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
 
     try:
         if action == "get_snapshot":
-            payload, blob, metadata = await _cached_snapshot(measurement_id)
+            since_rows = _request_since_rows(request)
+            payload, blob, dataset, metadata = await _cached_snapshot(measurement_id)
+            if since_rows is not None and since_rows > 0:
+                partial = await asyncio.to_thread(
+                    _partial_snapshot, measurement_id, dataset, metadata, since_rows
+                )
+                if partial is not None:
+                    payload, blob = partial
             response = _response(measurement_id, success=True, **payload)
             response["source"] = json_compatible(dict(metadata))
             # _handle_client pops this and sends it as one framed binary

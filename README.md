@@ -69,7 +69,9 @@ Optional extras are listed below. For example, install the Quantify extra with
 
 The snapshot callback is evaluated when a client requests data. It should
 return a consistent view of the measurement and use the producer's own lock
-when the underlying data can change concurrently.
+when the underlying data can change concurrently. The server takes ownership
+of each returned dataset, materializes it, and closes its backing resources;
+return a snapshot rather than the producer's owned dataset.
 
 ```python
 from qimchi_connect import live_measurement
@@ -81,6 +83,32 @@ with live_measurement(
 ):
     perform_measurement()
 ```
+
+## Following a measurement incrementally
+
+For a grid that grows along one shared leading dimension, clients can avoid
+downloading the rows they already hold. The first response is a full snapshot;
+its row metadata supplies the offset for the next request:
+
+```python
+from qimchi_connect import open_live_measurement_sync
+
+snapshot = open_live_measurement_sync("experiment-42", ws_url)
+progress = snapshot.encoding.get("qimchi_connect_rows")
+
+if progress is not None:
+    delta = open_live_measurement_sync(
+        "experiment-42",
+        ws_url,
+        since_rows=progress["rows_written"],
+    )
+```
+
+The returned `delta` contains only the missing rows. Its
+`encoding["qimchi_connect_rows"]` records the append dimension, the first row
+returned, the current written frontier, and the preallocated total. The client
+does not merge the delta automatically. Older servers ignore `since_rows`, and
+datasets without a common leading dimension continue to return full snapshots.
 
 ## Supported frameworks
 
@@ -201,6 +229,12 @@ modifying a variable.
 **The callback runs on the server thread.** It runs when a client requests data.
 Use a lock and return a copy instead of a live buffer. See
 `examples/generic_producer.py`. Use `QCoDeSSnapshotProvider` for QCoDeS.
+
+**Snapshot caching is configurable.** Responses for the same measurement share
+one serialized snapshot for 0.25 seconds by default. Set
+`QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds to tune the
+freshness/serialization tradeoff. Zero disables cache hits. Invalid values are
+ignored with a warning and use the default.
 
 ## Development
 

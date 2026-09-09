@@ -39,10 +39,10 @@ def test_cached_polls_reuse_one_dataset_sized_build(
 
     original_build_snapshot = server._build_snapshot
 
-    def counted_build_snapshot(measurement_id: str):
+    def counted_build_snapshot(measurement_id: str, snapshot_provider):
         nonlocal build_calls
         build_calls += 1
-        return original_build_snapshot(measurement_id)
+        return original_build_snapshot(measurement_id, snapshot_provider)
 
     monkeypatch.setattr(server, "SNAPSHOT_CACHE_TTL", float("inf"))
     monkeypatch.setattr(server, "_build_snapshot", counted_build_snapshot)

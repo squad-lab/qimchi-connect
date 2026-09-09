@@ -151,6 +151,61 @@ class TestRetention:
 
         assert "racy" not in server._SNAPSHOT_CACHE
 
+    def test_a_request_waiting_for_a_build_finishes_after_close(self, monkeypatch):
+        """A request admitted before close retains the provider it found."""
+        entered = threading.Event()
+        release = threading.Event()
+        admitted = threading.Event()
+        provider_calls = 0
+        admissions = 0
+
+        def slow() -> xr.Dataset:
+            nonlocal provider_calls
+            provider_calls += 1
+            if provider_calls == 1:
+                entered.set()
+                release.wait(5.0)
+            return xr.Dataset({"a": ("i", [1.0])})
+
+        server.register_snapshot_provider("closing", slow)
+        original_cached_snapshot = server._cached_snapshot
+
+        async def observed_cached_snapshot(measurement_id, provider, provider_epoch):
+            nonlocal admissions
+            admissions += 1
+            if admissions == 2:
+                admitted.set()
+            return await original_cached_snapshot(
+                measurement_id, provider, provider_epoch
+            )
+
+        monkeypatch.setattr(server, "_cached_snapshot", observed_cached_snapshot)
+
+        async def scenario() -> None:
+            first = asyncio.create_task(
+                server._process_request(
+                    {"action": "get_snapshot", "measurement_id": "closing"}
+                )
+            )
+            assert await asyncio.to_thread(entered.wait, 5.0)
+            second = asyncio.create_task(
+                server._process_request(
+                    {"action": "get_snapshot", "measurement_id": "closing"}
+                )
+            )
+            assert await asyncio.to_thread(admitted.wait, 5.0)
+
+            server.unregister_snapshot_provider("closing")
+            release.set()
+
+            responses = await asyncio.gather(first, second)
+            assert [_sizes(response) for response in responses] == [[1.0], [1.0]]
+
+        asyncio.run(scenario())
+
+        assert provider_calls == 2
+        assert "closing" not in server._SNAPSHOT_CACHE
+
     def test_stopping_the_server_clears_everything(self):
         server.register_snapshot_provider("x", lambda: xr.Dataset({"a": ("i", [1.0])}))
         _snapshot("x")

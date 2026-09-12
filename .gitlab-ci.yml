@@ -25,6 +25,13 @@ sast:
 secret_detection:
   stage: test
 
+# Fixes what ruff can fix, pushes the result back to the branch, then gates on
+# whatever is left, so a merge request is never blocked on a forgotten
+# `ruff format`.
+#
+# The commit carries [skip ci], which GitLab honours by creating no pipeline
+# for that push -- without it this job would trigger itself forever. It is the
+# same mechanism semantic-release already uses for its release commit.
 lint:
   stage: format
   before_script:
@@ -35,7 +42,34 @@ lint:
     # use `ruff@latest` or any of the `*` version specifiers, because a new
     # release can break the CI.
     - uv tool install ruff@0.16.6
+    - git config --global user.name "Janitor"
+    - git config --global user.email "squad@fz-juelich.de"
+    - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
   script:
+    # Never rewrite the default branch (merge-only, protected) or a tag.
+    - |
+      if [ -n "$CI_COMMIT_BRANCH" ] && [ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]; then
+        # CI checks out a detached HEAD; put the branch here so a commit lands on it.
+        git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
+        # Leftovers are the gate's business below -- exiting here would discard
+        # the fixes ruff has already written to disk.
+        ruff check --fix . || true
+        ruff format .
+        if git diff --quiet; then
+          echo "Nothing to fix."
+        else
+          git diff --stat
+          # -u, not -A: never sweep up a cache directory the job created.
+          git add -u
+          git commit -m "style: apply ruff fixes [skip ci]"
+          # Never force. If the branch moved while this ran, the rejected push
+          # is the right outcome and the next pipeline fixes the new tip.
+          git push origin "HEAD:$CI_COMMIT_BRANCH" ||
+            echo "WARNING: fixes could not be pushed. Is $CI_COMMIT_BRANCH protected against squad_janitor?"
+        fi
+      fi
+    # The gate. Formatting can no longer fail it on a branch, because the run
+    # above has already applied it; a real lint error still can.
     - ruff check .
     - ruff format --check .
 

@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.3.1 (2026-09-16)
+
+### Bug Fixes
+
+- **server**: Finish requests admitted before shutdown
+  ([`2ab18a8`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/2ab18a80dd1a9018632b5eb2ac327338035123ec))
+
+### Continuous Integration
+
+- Apply ruff fixes on the branch instead of failing
+  ([`ec16bce`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/ec16bce58ffd0c9e9bcfd9cae0f0c2206b1f7510))
+
+
 ## v0.3.0 (2026-09-07)
 
 ### Chores

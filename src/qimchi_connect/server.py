@@ -204,6 +204,15 @@ def _provider_entry(measurement_id: str) -> _ProviderEntry | None:
         return _PROVIDERS.get(measurement_id)
 
 
+def _provider_state(measurement_id: str) -> tuple[_ProviderEntry, int] | None:
+    """Return a provider and the epoch in which the request found it."""
+    with _PROVIDERS_LOCK:
+        entry = _PROVIDERS.get(measurement_id)
+        if entry is None:
+            return None
+        return entry, _PROVIDER_EPOCH
+
+
 def _measurement_ids() -> list[str]:
     """
     Return the identifiers of every published measurement.
@@ -214,6 +223,19 @@ def _measurement_ids() -> list[str]:
     """
     with _PROVIDERS_LOCK:
         return list(_PROVIDERS)
+
+
+def _open_provider(
+    measurement_id: str, entry: _ProviderEntry
+) -> tuple[xr.Dataset, Mapping[str, Any]]:
+    """Call a provider retained by an already-admitted request."""
+    dataset = entry.snapshot()
+    if not isinstance(dataset, xr.Dataset):
+        raise TypeError(
+            f"Snapshot provider for {measurement_id!r} returned "
+            f"{type(dataset).__name__}, expected xarray.Dataset"
+        )
+    return dataset, entry.metadata
 
 
 def _open_measurement(measurement_id: str) -> tuple[xr.Dataset, Mapping[str, Any]]:
@@ -235,14 +257,7 @@ def _open_measurement(measurement_id: str) -> tuple[xr.Dataset, Mapping[str, Any
     entry = _provider_entry(measurement_id)
     if entry is None:
         raise KeyError(measurement_id)
-
-    dataset = entry.snapshot()
-    if not isinstance(dataset, xr.Dataset):
-        raise TypeError(
-            f"Snapshot provider for {measurement_id!r} returned "
-            f"{type(dataset).__name__}, expected xarray.Dataset"
-        )
-    return dataset, entry.metadata
+    return _open_provider(measurement_id, entry)
 
 
 def _row_fields(dataset: xr.Dataset, *, rows_from: int) -> dict[str, Any]:
@@ -338,6 +353,7 @@ def _request_since_rows(request: Mapping[str, Any]) -> int | None:
 
 def _build_snapshot(
     measurement_id: str,
+    provider: _ProviderEntry,
 ) -> tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]:
     """
     Open a measurement, serialize it, and frame the binary message.
@@ -347,7 +363,10 @@ def _build_snapshot(
     always describe the same state.
 
     Args:
-        measurement_id (str): Identifier to resolve.
+        measurement_id (str): Identifier to include in the response.
+        provider (_ProviderEntry): Provider retained when the request was
+            admitted. It remains valid if publication closes while this work
+            is waiting for a worker thread.
 
     Returns:
         tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
@@ -355,7 +374,7 @@ def _build_snapshot(
             producer metadata.
 
     """
-    dataset, metadata = _open_measurement(measurement_id)
+    dataset, metadata = _open_provider(measurement_id, provider)
     try:
         # Snapshot callbacks hand ownership of their Dataset to the server.
         # Materialise lazy backends before closing them so a cached snapshot
@@ -384,6 +403,8 @@ def _build_snapshot(
 
 async def _cached_snapshot(
     measurement_id: str,
+    provider: _ProviderEntry,
+    provider_epoch: int,
 ) -> tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]:
     """
     Return a recent snapshot, building at most one per measurement at a time.
@@ -395,6 +416,9 @@ async def _cached_snapshot(
 
     Args:
         measurement_id (str): Identifier to resolve.
+        provider (_ProviderEntry): Provider retained when the request was
+            admitted.
+        provider_epoch (int): Provider epoch at admission time.
 
     Returns:
         tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
@@ -410,38 +434,46 @@ async def _cached_snapshot(
         _SNAPSHOT_LOCKS[measurement_id] = bound
 
     async with bound[1]:
-        epoch = _PROVIDER_EPOCH
         entry = _SNAPSHOT_CACHE.get(measurement_id)
         if (
             entry is not None
-            and entry.epoch == epoch
+            and entry.epoch == provider_epoch
             and time.monotonic() - entry.created < SNAPSHOT_CACHE_TTL
         ):
             return entry.payload, entry.blob, entry.dataset, entry.metadata
 
         payload, blob, dataset, metadata = await asyncio.to_thread(
-            _build_snapshot, measurement_id
+            _build_snapshot, measurement_id, provider
         )
-        if _PROVIDER_EPOCH == epoch:
-            _SNAPSHOT_CACHE[measurement_id] = _SnapshotCacheEntry(
-                payload=payload,
-                blob=blob,
-                dataset=dataset,
-                metadata=metadata,
-                created=time.monotonic(),
-                epoch=epoch,
-            )
+        # Registration changes run on the producer thread. Hold the same lock
+        # across the check and cache write so an invalidation cannot slip
+        # between them and leave a closed provider's snapshot behind.
+        with _PROVIDERS_LOCK:
+            if (
+                _PROVIDER_EPOCH == provider_epoch
+                and _PROVIDERS.get(measurement_id) is provider
+            ):
+                _SNAPSHOT_CACHE[measurement_id] = _SnapshotCacheEntry(
+                    payload=payload,
+                    blob=blob,
+                    dataset=dataset,
+                    metadata=metadata,
+                    created=time.monotonic(),
+                    epoch=provider_epoch,
+                )
         return payload, blob, dataset, metadata
 
 
 def _build_data_payload(
-    measurement_id: str, variables: list[str]
+    measurement_id: str, provider: _ProviderEntry, variables: list[str]
 ) -> tuple[dict[str, Any], Mapping[str, Any]]:
     """
     Build a ``get_data`` payload off the event loop.
 
     Args:
         measurement_id (str): Identifier to resolve.
+        provider (_ProviderEntry): Provider retained when the request was
+            admitted.
         variables (list[str]): Names to retrieve, or empty for structure only.
 
     Returns:
@@ -449,7 +481,7 @@ def _build_data_payload(
             metadata.
 
     """
-    dataset, metadata = _open_measurement(measurement_id)
+    dataset, metadata = _open_provider(measurement_id, provider)
     attrs = json_compatible(dict(dataset.attrs))
     if not variables:
         return {
@@ -465,12 +497,16 @@ def _build_data_payload(
     return {"data": data, "attrs": attrs}, metadata
 
 
-def _build_array_payload(measurement_id: str, array_path: str) -> dict[str, Any] | None:
+def _build_array_payload(
+    measurement_id: str, provider: _ProviderEntry, array_path: str
+) -> dict[str, Any] | None:
     """
     Build a ``get_zarr_array`` payload off the event loop.
 
     Args:
         measurement_id (str): Identifier to resolve.
+        provider (_ProviderEntry): Provider retained when the request was
+            admitted.
         array_path (str): Variable name to retrieve.
 
     Returns:
@@ -478,7 +514,7 @@ def _build_array_payload(measurement_id: str, array_path: str) -> dict[str, Any]
             not present.
 
     """
-    dataset, _metadata = _open_measurement(measurement_id)
+    dataset, _metadata = _open_provider(measurement_id, provider)
     if not array_path or array_path not in dataset.variables:
         return None
     array = dataset[array_path]
@@ -578,16 +614,20 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
     if not measurement_id:
         return _response(success=False, error="measurement_id required")
 
-    if _provider_entry(measurement_id) is None:
+    provider_state = _provider_state(measurement_id)
+    if provider_state is None:
         return _response(
             success=False,
             error=f"Measurement {measurement_id} not found",
         )
+    provider, provider_epoch = provider_state
 
     try:
         if action == "get_snapshot":
             since_rows = _request_since_rows(request)
-            payload, blob, dataset, metadata = await _cached_snapshot(measurement_id)
+            payload, blob, dataset, metadata = await _cached_snapshot(
+                measurement_id, provider, provider_epoch
+            )
             if since_rows is not None and since_rows > 0:
                 partial = await asyncio.to_thread(
                     _partial_snapshot, measurement_id, dataset, metadata, since_rows
@@ -606,7 +646,7 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
         if action == "get_data":
             variables = request.get("variables", [])
             payload, metadata = await asyncio.to_thread(
-                _build_data_payload, measurement_id, variables
+                _build_data_payload, measurement_id, provider, variables
             )
             response = _response(measurement_id, success=True, **payload)
             if not variables:
@@ -616,7 +656,7 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
         if action == "get_zarr_array":
             array_path = request.get("array_path", "")
             payload = await asyncio.to_thread(
-                _build_array_payload, measurement_id, array_path
+                _build_array_payload, measurement_id, provider, array_path
             )
             if payload is None:
                 return _response(

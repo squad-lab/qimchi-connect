@@ -120,7 +120,12 @@ type = "gitlab"
 domain = "gitlab.com"
 
 [tool.semantic_release.changelog]
-exclude_commit_patterns = ["^chore\\(release\\):", "^ruff update$"]
+exclude_commit_patterns = [
+    "^chore\\(release\\):",
+    "^ruff update$",
+    # The CI lint job commits its own formatting fixes.
+    "^style: apply ruff fixes",
+]
 
 [tool.ruff]
 line-length = 88

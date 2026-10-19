@@ -37,7 +37,7 @@ class LiveMeasurement:
     """
     One row of the live discovery registry.
 
-    Field and column names match the qanary schema the table was first
+    Field and column names match the Qanary schema the table was first
     written with, so an existing ``live_measurements.db`` keeps working.
 
     """

@@ -1,4 +1,4 @@
-# Contributing to qimchi-connect
+# Contributing to Qimchi-Connect
 
 ## Getting set up
 
@@ -14,6 +14,14 @@ three places. Different versions can produce different formatting results.
 
 The Quantify tests use a fake `quantify_core` module, so the `quantify` extra is
 not required to run them.
+
+## Test strategy
+
+The pytest suite in `tests/` covers the wire protocol, encoding, producer, server, discovery registry, connections and failure cases, concurrency, shutdown, framework providers and command-line tool. CI tests Python 3.13 and 3.14 on Linux and Python 3.13 on Windows. All must pass before merging. Every pipeline reports coverage.
+
+Use fake modules for frameworks unavailable in the test environment (see `tests/test_quantify_provider.py`). Each script in `examples/` must have a test that runs it.
+
+Include a regression test with each bug fix and tests for each new feature.
 
 ## Branches and releases
 

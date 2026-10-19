@@ -95,7 +95,9 @@ commit_message = "chore(release): v{version}\n\n[skip ci]"
 # <semantic-release>`, which is not a valid address, so GitLab cannot
 # attribute it. The git identity CI sets does not apply to this commit.
 commit_author = "Janitor <squad@fz-juelich.de>"
-build_command = "uv build"
+# Update CITATION.cff and the README citation; include both in the release commit.
+build_command = "bash scripts/sync_release_metadata.sh && uv build"
+assets = ["CITATION.cff", "README.md"]
 tag_format = "v{version}"
 # Keep minor releases below 1.0 while the API is unstable.
 major_on_zero = false

@@ -6,8 +6,8 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
-  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
+  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
 ]
 keywords = ["quantum", "measurement", "live", "xarray", "websockets", "qimchi"]
 classifiers = [
@@ -33,7 +33,7 @@ dependencies = [
 Homepage = "https://gitlab.com/squad-lab/qimchi-connect"
 Repository = "https://gitlab.com/squad-lab/qimchi-connect"
 Issues = "https://gitlab.com/squad-lab/qimchi-connect/-/issues"
-Qimchi = "https://gitlab.com/squad-lab/qimchi"
+Qimchi = "https://qimchi.squad-lab.org/"
 "SQUAD Lab" = "https://squad-lab.org/"
 
 [project.optional-dependencies]

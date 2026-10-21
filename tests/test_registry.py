@@ -111,7 +111,7 @@ def test_cleanup_rejects_a_negative_retention():
 
 
 def test_the_registry_round_trips_a_measurement_through_its_lifecycle():
-    """Register, look up, move on disk, then end -- the qanary sequence."""
+    """Register, look up, move on disk, then end -- the Qanary sequence."""
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     registry.register_measurement(
         "old", "/tmp/old.nc", "ws://localhost:9000", 9000, started

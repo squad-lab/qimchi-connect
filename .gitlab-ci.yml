@@ -73,6 +73,12 @@ lint:
     - ruff check .
     - ruff format --check .
 
+citation:
+  stage: test
+  script:
+    - pip install --quiet cffconvert==2.0.0
+    - cffconvert --validate
+
 pytest:
   stage: test
   # 3.13 is the minimum and recommended runtime. 3.14 stays in the matrix as
@@ -213,11 +219,31 @@ gitlab_release:
         --notes-file CHANGELOG.md \
         --ref "$RELEASE_TAG"
 
-# Publishes to PyPI whenever semantic_release cut a version on main.
-# PYPI_SPANDAN must exist as a masked, protected CI/CD variable holding the
-# PyPI API token. The job is skipped rather than failed while it is unset, so
-# the pipeline stays green until the variable is added.
-# TODO: Check and remove once integrated
+# Archive releases on Zenodo using the tagged CITATION.cff.
+# Skip this job when ZENODO_SPANDAN is unset.
+zenodo:
+  stage: release
+  needs:
+    - job: semantic_release
+      artifacts: true
+    - job: gitlab_release
+      artifacts: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $ZENODO_SPANDAN
+  script:
+    - |
+      if [ "$RELEASE_CREATED" != "true" ]; then
+        echo "semantic-release did not cut a version; nothing to archive."
+        exit 0
+      fi
+      # Fetch the release tag created after this pipeline checked out the source.
+      git fetch --tags origin
+      ARCHIVE="qimchi-connect-$RELEASE_TAG.zip"
+      git archive --format=zip --prefix="qimchi-connect-${RELEASE_TAG#v}/" -o "$ARCHIVE" "$RELEASE_TAG"
+      git show "$RELEASE_TAG:CITATION.cff" > release.cff
+      pip install --quiet pyyaml
+      ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$RELEASE_TAG" --cff release.cff --file "$ARCHIVE"
+
 pypi:
   stage: release
   needs:

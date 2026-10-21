@@ -1,5 +1,5 @@
 """
-Tests for the qimchi-connect command-line entry point.
+Tests for the Qimchi-Connect command-line entry point.
 
 The CLI is a shipped console script, so its argument wiring and its exit
 status are part of the public surface even though the work itself lives in

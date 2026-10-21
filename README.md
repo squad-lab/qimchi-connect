@@ -1,4 +1,4 @@
-# Qimchi Connect
+# Qimchi-Connect
 
 [![pipeline](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?ignore_skipped=true&key_text=pipeline&key_width=60)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
 [![tests](https://gitlab.com/squad-lab/qimchi-connect/badges/main/pipeline.svg?job=pytest%3A%20%5B3.13%5D&ignore_skipped=true&key_text=tests&key_width=40)](https://gitlab.com/squad-lab/qimchi-connect/-/pipelines?ref=main)
@@ -10,18 +10,20 @@
 requiring a specific measurement framework or storage format.
 
 To publish a measurement, provide a callback that returns the current
-`xarray.Dataset`. Built-in providers support QCoDeS, qanary, and Quantify.
+`xarray.Dataset`. Built-in providers support QCoDeS, Qanary, and Quantify.
 
 ---
 
-- [Qimchi Connect](#qimchi-connect)
+- [Qimchi-Connect](#qimchi-connect)
   - [Installation](#installation)
   - [Publishing a measurement](#publishing-a-measurement)
+  - [Following a measurement incrementally](#following-a-measurement-incrementally)
   - [Supported frameworks](#supported-frameworks)
   - [Runnable examples](#runnable-examples)
   - [Repairing discovery records](#repairing-discovery-records)
   - [Runtime behavior](#runtime-behavior)
   - [Development](#development)
+  - [Citing Qimchi-Connect](#citing-qimchi-connect)
   - [License](#license)
 
 ---
@@ -52,7 +54,7 @@ For a project managed with `uv`:
 uv add "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@preview"
 ```
 
-Qimchi Connect requires Python 3.13 or later. Python 3.13 is recommended, and
+Qimchi-Connect requires Python 3.13 or later. Python 3.13 is recommended, and
 CI also tests Python 3.14.
 
 Optional extras are listed below. For example, install the Quantify extra with
@@ -151,7 +153,7 @@ with live_measurement(live.measurement_id, live, disk_path=live.disk_path):
     MC.run(experiment_name)
 ```
 
-`QanarySnapshotProvider` reads the in-memory Zarr store used by a qanary
+`QanarySnapshotProvider` reads the in-memory Zarr store used by a Qanary
 sweep:
 
 ```python
@@ -161,7 +163,7 @@ from qimchi_connect import QanarySnapshotProvider, register_live_measurement
 register_live_measurement(measurement_id, QanarySnapshotProvider(memory_store))
 ```
 
-Qanary was called qcutils up to and including qimchi-connect 0.1.0, where this
+Qanary was called qcutils up to and including Qimchi-Connect 0.1.0, where this
 provider was named `QCUtilsSnapshotProvider`. That name was removed. Please import
 `QanarySnapshotProvider` instead.
 
@@ -190,7 +192,7 @@ The examples do not require hardware. All three call
 test for it in that file. `test_every_example_is_covered_by_a_test` checks this
 requirement.
 
-There is no separate qanary script in this directory because qanary already
+There is no separate Qanary script in this directory because Qanary already
 includes higher-level examples based on `qanary.measure.run` and `Sweep`.
 
 ## Repairing discovery records
@@ -250,6 +252,25 @@ uv run pytest
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch and release rules and for
 instructions on adding framework support.
 
+## Citing Qimchi-Connect
+
+Please cite Qimchi-Connect when using it in your work:
+
+```bibtex
+@misc{qimchi-connect,
+  author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
+  title        = {Qimchi-Connect: Publish and discover live xarray datasets in Qimchi},
+  year         = {2026},
+  note         = {Version 0.3.1, software},
+  howpublished = {GitLab},
+  url          = {https://gitlab.com/squad-lab/qimchi-connect}
+}
+```
+
+[CITATION.cff](CITATION.cff) has the same information in machine-readable form.
+
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](LICENSE).
+Qimchi-Connect is free software under the [AGPL-3.0-or-later](LICENSE). Dependencies are installed separately under their own licenses.
+
+Copyright © 2026 Forschungszentrum Jülich GmbH, PGI-11.

@@ -1,7 +1,7 @@
 """
 Tests for publishing and closing a measurement by identifier.
 
-A producer whose publish and close happen in different places -- qanary
+A producer whose publish and close happen in different places -- Qanary
 registers in ``run()`` and closes in a ``finally`` on another method -- can
 address an open publication by its identifier instead of carrying the handle
 between them or keeping its own mapping.

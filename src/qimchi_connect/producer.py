@@ -211,9 +211,9 @@ class QCoDeSSnapshotProvider:
 
 class QanarySnapshotProvider:
     """
-    Snapshot provider for a running qanary measurement.
+    Snapshot provider for a running Qanary measurement.
 
-    qanary keeps its live data in an in-memory Zarr store that the sweep
+    Qanary keeps its live data in an in-memory Zarr store that the sweep
     writes to as it goes. This reads the current contents of that store on
     every call, so a client always sees the run so far.
 

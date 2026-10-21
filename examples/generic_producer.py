@@ -1,10 +1,10 @@
 """
 Publish a live xarray dataset to Qimchi from a framework-neutral acquisition
-loop -- no QCoDeS, qanary, or Quantify required.
+loop -- no QCoDeS, Qanary, or Quantify required.
 
 Run with:  python examples/generic_producer.py
 
-This is the pattern to follow for any measurement library qimchi-connect does
+This is the pattern to follow for any measurement library Qimchi-Connect does
 not already know about: build/update an `xarray.Dataset` yourself, and hand
 `live_measurement` a callback that returns a consistent snapshot of it.
 

@@ -6,8 +6,8 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
-  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
+  { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
 ]
 keywords = ["quantum", "measurement", "live", "xarray", "websockets", "qimchi"]
 classifiers = [
@@ -20,7 +20,7 @@ classifiers = [
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=1.26",
-    # QanarySnapshotProvider reads an in-memory Zarr store. qanary also
+    # QanarySnapshotProvider reads an in-memory Zarr store. Qanary also
     # depends on Zarr.
     "zarr>=2.18",
     # websockets 16 logs a full traceback when a timed-out probe disconnects
@@ -33,7 +33,7 @@ dependencies = [
 Homepage = "https://gitlab.com/squad-lab/qimchi-connect"
 Repository = "https://gitlab.com/squad-lab/qimchi-connect"
 Issues = "https://gitlab.com/squad-lab/qimchi-connect/-/issues"
-Qimchi = "https://gitlab.com/squad-lab/qimchi"
+Qimchi = "https://qimchi.squad-lab.org/"
 "SQUAD Lab" = "https://squad-lab.org/"
 
 [project.optional-dependencies]
@@ -95,7 +95,9 @@ commit_message = "chore(release): v{version}\n\n[skip ci]"
 # <semantic-release>`, which is not a valid address, so GitLab cannot
 # attribute it. The git identity CI sets does not apply to this commit.
 commit_author = "Janitor <squad@fz-juelich.de>"
-build_command = "uv build"
+# Update CITATION.cff and the README citation; include both in the release commit.
+build_command = "bash scripts/sync_release_metadata.sh && uv build"
+assets = ["CITATION.cff", "README.md"]
 tag_format = "v{version}"
 # Keep minor releases below 1.0 while the API is unstable.
 major_on_zero = false

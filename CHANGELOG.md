@@ -2,6 +2,32 @@
 
 <!-- version list -->
 
+## v0.3.2 (2026-10-21)
+
+### Bug Fixes
+
+- **metadata**: Publish citation and author metadata
+  ([`88fdef9`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/88fdef90d99be3f44cc43e6f1f04d2a2a96daba0))
+
+### Chores
+
+- **metadata**: Add citation and ownership information
+  ([`0d7198c`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/0d7198c87bd7f3b871ba18ab512d0717f63b7dc0))
+
+### Continuous Integration
+
+- Keep the Zenodo token on the Zenodo host
+  ([`a62ccaf`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/a62ccaf4c25d309a3d3089a063b818d04c4fcf79))
+
+- Synchronize citations and archive releases on Zenodo
+  ([`f6869c3`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/f6869c352ccc6335b6efc8bcde4c1f4a6558ab06))
+
+### Documentation
+
+- Align project naming and contributor guidance
+  ([`a28dab7`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/a28dab758aa0e10f102bcc16d6e75ee912e710b6))
+
+
 ## v0.3.1 (2026-09-16)
 
 ### Bug Fixes

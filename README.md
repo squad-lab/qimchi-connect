@@ -261,7 +261,7 @@ Please cite Qimchi-Connect when using it in your work:
   author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
   title        = {Qimchi-Connect: Publish and discover live xarray datasets in Qimchi},
   year         = {2026},
-  note         = {Version 0.3.1, software},
+  note         = {Version 0.3.2, software},
   howpublished = {GitLab},
   url          = {https://gitlab.com/squad-lab/qimchi-connect}
 }

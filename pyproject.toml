@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "Jyotirmaya Shivottam", email = "shivottam@proton.me" },
   { name = "Spandan Anupam", email = "s.anupam@fz-juelich.de" },
+  { name = "Vincent Mourik", email = "v.mourik@fz-juelich.de" },
 ]
 keywords = ["quantum", "measurement", "live", "xarray", "websockets", "qimchi"]
 classifiers = [

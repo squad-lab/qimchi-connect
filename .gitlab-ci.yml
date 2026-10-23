@@ -241,8 +241,10 @@ zenodo:
       ARCHIVE="qimchi-connect-$RELEASE_TAG.zip"
       git archive --format=zip --prefix="qimchi-connect-${RELEASE_TAG#v}/" -o "$ARCHIVE" "$RELEASE_TAG"
       git show "$RELEASE_TAG:CITATION.cff" > release.cff
+      git show "$RELEASE_TAG:README.md" > release-readme.md
+      git show "$RELEASE_TAG:CHANGELOG.md" > release-changelog.md
       pip install --quiet pyyaml
-      ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$RELEASE_TAG" --cff release.cff --file "$ARCHIVE"
+      ZENODO_TOKEN="$ZENODO_SPANDAN" python scripts/zenodo_release.py --tag "$RELEASE_TAG" --cff release.cff --readme release-readme.md --changelog release-changelog.md --file "$ARCHIVE"
 
 pypi:
   stage: release

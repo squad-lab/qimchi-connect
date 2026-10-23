@@ -5,6 +5,7 @@
 [![coverage](https://gitlab.com/squad-lab/qimchi-connect/badges/main/coverage.svg?key_text=coverage&key_width=64)](https://gitlab.com/squad-lab/qimchi-connect/-/jobs)
 [![latest release](https://gitlab.com/squad-lab/qimchi-connect/-/badges/release.svg?key_text=release&key_width=54)](https://gitlab.com/squad-lab/qimchi-connect/-/releases)
 [![PyPI version](https://img.shields.io/pypi/v/qimchi-connect)](https://pypi.org/project/qimchi-connect/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23536727.svg)](https://doi.org/10.5281/zenodo.23536727)
 
 `qimchi-connect` publishes real-time `xarray.Dataset` snapshots to Qimchi without
 requiring a specific measurement framework or storage format.
@@ -258,15 +259,18 @@ Please cite Qimchi-Connect when using it in your work:
 
 ```bibtex
 @misc{qimchi-connect,
-  author       = {Shivottam, Jyotirmaya and Anupam, Spandan},
+  author       = {Shivottam, Jyotirmaya and Anupam, Spandan and Mourik, Vincent},
   title        = {Qimchi-Connect: Publish and discover live xarray datasets in Qimchi},
   year         = {2026},
   note         = {Version 0.3.2, software},
-  howpublished = {GitLab},
-  url          = {https://gitlab.com/squad-lab/qimchi-connect}
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.23536727},
+  url          = {https://doi.org/10.5281/zenodo.23536727}
 }
 ```
 
+This DOI covers all archived releases. To cite a specific version, use its DOI from the
+[Zenodo record](https://doi.org/10.5281/zenodo.23536727).
 [CITATION.cff](CITATION.cff) has the same information in machine-readable form.
 
 ## License

@@ -2,6 +2,12 @@
 
 ## Getting set up
 
+### Python support policy
+
+We support the second-newest stable Python feature release. This balances timely
+security and bug-fix support with enough time for our dependencies to stabilize
+on each new Python version.
+
 ```console
 uv sync --extra dev --extra test --extra examples
 uv run pre-commit install     # once per clone

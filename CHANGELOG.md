@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-11-10)
+
+### Continuous Integration
+
+- Migrate Zenodo archiving to the records API
+  ([`002b523`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/002b523645545e1be3024f0c97511a7f9f47f2bd))
+
+- Test Windows on Python 3.14
+  ([`6e84e32`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/6e84e329c289666360573be8a80e08b0ea3fd64b))
+
+### Documentation
+
+- Add the Zenodo DOI and Vincent Mourik to project metadata
+  ([`8ab66b6`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/8ab66b6bcd5d741bd0aa138439d35aa1275b6773))
+
+- Rewrite comments and docstrings for clarity
+  ([`6469803`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/646980349be24d412bd2a26025e56c9e7f5ff468))
+
+### Features
+
+- **qanary**: Support dict-backed Zarr stores
+  ([`1115c4d`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/1115c4d1da78b9af758e4e98ec90eb4479292fc0))
+
+
 ## v0.3.2 (2026-10-21)
 
 ### Bug Fixes

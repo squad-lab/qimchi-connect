@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update citation versions and the README citation year before the release build.
+# Update release metadata before building the package.
 set -euo pipefail
 : "${NEW_VERSION:?NEW_VERSION is set by semantic-release}"
 sed -i "s/^version: .*/version: ${NEW_VERSION}/" CITATION.cff

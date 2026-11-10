@@ -8,18 +8,24 @@ uv run pre-commit install     # once per clone
 uv run pytest
 ```
 
-`ruff` is pinned in the `dev` extra in `pyproject.toml`,
-`.pre-commit-config.yaml`, and the CI `lint` job. Use the same version in all
-three places. Different versions can produce different formatting results.
+The `dev` extra in `pyproject.toml`, `.pre-commit-config.yaml`, and the CI
+`lint` job pin the same `ruff` version. Update all three together to keep local
+and CI formatting consistent.
 
 The Quantify tests use a fake `quantify_core` module, so the `quantify` extra is
 not required to run them.
 
 ## Test strategy
 
-The pytest suite in `tests/` covers the wire protocol, encoding, producer, server, discovery registry, connections and failure cases, concurrency, shutdown, framework providers and command-line tool. CI tests Python 3.13 and 3.14 on Linux and Python 3.13 on Windows. All must pass before merging. Every pipeline reports coverage.
+The pytest suite covers the wire protocol, encoding, producer, server,
+discovery registry, connection failures, concurrency, shutdown, framework
+providers, and command-line tool. CI runs it on Python 3.13 and 3.14 on Linux
+and Python 3.14 on Windows. All jobs must pass before merging, and every
+pipeline reports coverage.
 
-Use fake modules for frameworks unavailable in the test environment (see `tests/test_quantify_provider.py`). Each script in `examples/` must have a test that runs it.
+Use fake modules for frameworks unavailable in the test environment; see
+`tests/test_quantify_provider.py`. Every script in `examples/` must have a test
+that runs it.
 
 Include a regression test with each bug fix and tests for each new feature.
 
@@ -27,14 +33,14 @@ Include a regression test with each bug fix and tests for each new feature.
 
 - `main` is stable and accepts changes only through merges.
 - Merge feature branches into `preview` first. All branches are linted and
-  tested. The `preview` branch also builds the package. It is not tagged. Only
-  merges to `main` create releases.
+  tested, and `preview` also builds the package. The `preview` branch is not
+  tagged; only merges to `main` create releases.
 
-CI runs [python-semantic-release](https://python-semantic-release.readthedocs.io)
-on `main`. It reads commits since the last tag, updates the version in
-`pyproject.toml`, updates `CHANGELOG.md`, creates a tag, and publishes the
-package to PyPI. The same pipeline creates a GitLab Release for that tag using
-the CI job token.
+On `main`, CI runs
+[python-semantic-release](https://python-semantic-release.readthedocs.io). It
+determines the next version from commits since the last tag, updates
+`pyproject.toml` and `CHANGELOG.md`, creates a tag, publishes the package to
+PyPI, and creates a GitLab Release with the CI job token.
 
 | Prefix | Release |
 |---|---|
@@ -55,18 +61,16 @@ with live_measurement("run-42", lambda: build_current_dataset()):
     acquire()
 ```
 
-Create a provider class when a callback is not sufficient. Common reasons are
-thread restrictions and framework-specific conventions.
+Create a provider class when a callback is not sufficient. Common reasons are thread restrictions and framework-specific conventions.
 
-**The framework's handle cannot be read from the server's thread.** The
-snapshot callback runs on the WebSocket server's thread whenever a client asks
-for data. QCoDeS holds a thread-affine SQLite connection, so reading it there
-raises `sqlite3.ProgrammingError`. `QCoDeSSnapshotProvider` refreshes a cached
-snapshot on the measurement thread. The callback reads that cache under a
-lock.
+**Thread-restricted handles.** The snapshot callback runs on the WebSocket
+server thread. QCoDeS binds its SQLite connection to the measurement thread,
+so reading it from the server thread raises `sqlite3.ProgrammingError`.
+`QCoDeSSnapshotProvider` refreshes a locked cache on the measurement thread;
+the callback reads that cache.
 
-**The framework has data conventions.** `QuantifySnapshotProvider` derives
-`measurement_id`, `disk_path`, and `metadata` from a tuid.
+**Framework data conventions.** `QuantifySnapshotProvider` derives
+`measurement_id`, `disk_path`, and `metadata` from a TUID.
 
 A provider does not inherit from a base class. Implement the applicable
 members:
@@ -74,24 +78,23 @@ members:
 | Member | Contract |
 |---|---|
 | `__call__(self) -> xr.Dataset` | Required. Return the run so far. Called from the server's thread, so it must be safe there. |
-| `metadata` | Optional. Producer identification, used unless the caller passes its own. |
-| `prepare(self)` | Optional. Called by `register_live_measurement` before publishing, so a client that connects immediately sees the run so far. |
-| `measurement_id`, `disk_path` | Optional values for the caller. They are not read automatically. |
+| `metadata` | Optional producer identification, used unless the caller passes its own. |
+| `prepare(self)` | Optional. Called by `register_live_measurement` before publication to create the initial snapshot. |
+| `measurement_id`, `disk_path` | Optional values exposed to the caller. They are not read automatically. |
 
 Follow these rules:
 
-1. **Import the framework lazily**, inside `__init__`, and raise `ImportError`
-   with the name of the required extra. This keeps the rest of the package
-   usable without the framework.
-2. **Do not raise from `__call__`.** If a read fails while the framework is
-   writing, return the previous snapshot.
+1. **Import the framework lazily** inside `__init__`, and raise `ImportError`
+   with the required extra. This keeps the framework optional.
+2. **Do not raise from `__call__`.** Return the previous snapshot if a read
+   fails while the framework is writing.
 3. **Do not hold a handle open** across calls if the producer is still writing
    through it. Open, read, materialize, and close it in each call.
 
 Then:
 
-- Add the extra to `pyproject.toml` if the framework is not already a
-  dependency, and say in `CONTRIBUTING.md` if it conflicts with another.
+- Add an extra to `pyproject.toml` if the framework is not already a
+  dependency. Document any dependency conflicts in `CONTRIBUTING.md`.
 - Export the class from `qimchi_connect/__init__.py` and `__all__`.
 - Add tests. If the framework cannot be installed in the test environment,
   inject a fake module as shown in `tests/test_quantify_provider.py`.
@@ -101,9 +104,9 @@ Then:
 
 ## Style
 
-- Google-style docstrings with `Args:`, `Returns:` and `Raises:`, on every
-  function and class.
-- Docstrings and comments describe what the code does and the constraints it
-  works under. Do not include change history.
+- Use Google-style docstrings for public APIs and for internal code that needs
+  explanation. Do not repeat the signature or an expressive test name.
+- Comments should explain constraints or non-obvious decisions, not narrate
+  the code or record its history.
 - Full type hints.
 - Run blocking work outside the event loop with `asyncio.to_thread`.

@@ -1,7 +1,4 @@
-"""
-SQLite discovery registry for live measurement producers and consumers.
-
-"""
+"""SQLite registry for discovering live measurements."""
 
 from __future__ import annotations
 
@@ -20,26 +17,20 @@ logger = logging.getLogger(__name__)
 _DATABASE_PATH: Path | None = None
 _DATABASE_LOCK = threading.RLock()
 
-# How long an endpoint has to stay unanswerable before its measurements are
-# treated as gone.
+# Time an endpoint may remain unreachable before its records are ended.
 DEFAULT_UNREACHABLE_GRACE = 60.0
 
-# How often a producer stamps the registry to say it is still running, and how
-# long a consumer waits before treating it as stopped. The window spans three
-# missed beats, so a producer briefly too busy to answer a probe is not
-# mistaken for one that has exited.
+# Producers send a heartbeat every five seconds. Three missed heartbeats mark
+# a producer as stale.
 DEFAULT_HEARTBEAT_INTERVAL = 5.0
 DEFAULT_STALE_AFTER = 3 * DEFAULT_HEARTBEAT_INTERVAL
 
 
 @dataclass(slots=True)
 class LiveMeasurement:
-    """
-    One row of the live discovery registry.
+    """One discovery record.
 
-    Field and column names match the Qanary schema the table was first
-    written with, so an existing ``live_measurements.db`` keeps working.
-
+    Field names retain the original Qanary schema for database compatibility.
     """
 
     measurement_id: str
@@ -54,10 +45,7 @@ class LiveMeasurement:
 
 @dataclass(frozen=True, slots=True)
 class RegistryMaintenanceResult:
-    """
-    Outcome of one :func:`maintain_registry` pass.
-
-    """
+    """Result of one :func:`maintain_registry` pass."""
 
     stale_measurement_ids: tuple[str, ...]
     deleted_count: int
@@ -67,11 +55,8 @@ def get_database_path() -> Path:
     """
     Return the live registry path, creating its parent directory if needed.
 
-    The registry lives in Qimchi's application directory (``QIMCHI_HOME``,
-    ``~/.qimchi`` by default) rather than any producer's, because QCoDeS,
-    Quantify and Qanary producers all publish into the one file Qimchi reads.
-    Honouring ``QIMCHI_HOME`` keeps producer and viewer in step when the home
-    is moved.
+    The registry is stored under ``QIMCHI_HOME`` (``~/.qimchi`` by default) so
+    every producer writes to the database read by Qimchi.
 
     Returns:
         Path: SQLite database path.
@@ -226,8 +211,8 @@ def heartbeat(measurement_id: str, when: str | None = None) -> None:
     """
     Record that a producer is still running.
 
-    Called on a timer by the process that owns the measurement. A row whose
-    stamp stops advancing is treated as gone.
+    Producers call this periodically. Records with stale heartbeats are ended
+    during registry maintenance.
 
     Args:
         measurement_id (str): Identifier to stamp.
@@ -287,12 +272,9 @@ def _row_to_record(row: sqlite3.Row) -> LiveMeasurement:
     )
 
 
-# Freshness is defined here and read by every caller through _live_records.
-# julianday() is used rather than a string comparison or datetime(): ISO-8601
-# sorts lexically only when every stamp carries the same offset, so a fresh
-# beat written west of UTC would sort below a UTC cutoff, and datetime()
-# truncates to whole seconds, which widens any window shorter than that.
-# julianday() normalises the offset and keeps sub-second resolution.
+# julianday() normalizes timezone offsets and preserves subsecond precision.
+# Lexical comparison requires matching offsets, while SQLite's datetime()
+# truncates fractional seconds.
 _LIVENESS_SQL = """
     SELECT measurement_id, fpath, ws_url, ws_port, live_status,
            started_at, ended_at, last_seen,
@@ -309,7 +291,7 @@ _LIVENESS_SQL = """
 
 def _live_records(stale_after: float) -> list[tuple[LiveMeasurement, str]]:
     """
-    Return every record marked live, each tagged with how it reports liveness.
+    Return records marked live with their heartbeat state.
 
     Args:
         stale_after (float): Seconds a heartbeat may go unrefreshed before the
@@ -317,8 +299,7 @@ def _live_records(stale_after: float) -> list[tuple[LiveMeasurement, str]]:
 
     Returns:
         list[tuple[LiveMeasurement, str]]: Records paired with ``"beating"``,
-            ``"stopped"``, or ``"unknown"`` for a producer that never stamped
-            one.
+            ``"stopped"``, or ``"unknown"`` when no heartbeat was recorded.
 
     Raises:
         ValueError: If ``stale_after`` is negative.
@@ -340,12 +321,11 @@ def get_live_measurements(
     *, stale_after: float = DEFAULT_STALE_AFTER
 ) -> list[LiveMeasurement]:
     """
-    Return records currently marked live whose producer still looks alive.
+    Return records whose producer has not become stale.
 
     Args:
-        stale_after (float): Seconds a heartbeat may go unrefreshed before the
-            record is left out. Records from a producer that never stamps one
-            are always included; reconciliation probes those instead.
+        stale_after (float): Maximum heartbeat age. Records without a heartbeat
+            remain included until reconciliation probes their endpoint.
 
     Returns:
         list[LiveMeasurement]: Live records ordered newest first.
@@ -443,10 +423,7 @@ def cleanup_old_measurements(days: int = 7) -> int:
 
 def _note_unreachable(measurement_id: str, now: datetime.datetime) -> float:
     """
-    Record that an endpoint went unanswered and report how long it has been.
-
-    The first miss stamps the row and later ones leave it, so the elapsed time
-    is measured from the last answer.
+    Record an unreachable endpoint and return the duration of the outage.
 
     Args:
         measurement_id (str): Identifier whose endpoint failed to answer.
@@ -454,7 +431,7 @@ def _note_unreachable(measurement_id: str, now: datetime.datetime) -> float:
 
     Returns:
         float: Seconds the endpoint has been unanswerable, zero on the first
-            miss or when the stored stamp cannot be read.
+            miss or if the stored timestamp is invalid.
 
     """
     with _connection() as connection:
@@ -503,21 +480,18 @@ def reconcile_live_measurements(
     """
     End live records whose producer has gone.
 
-    A producer is gone if its heartbeat stopped, or -- for a producer that
-    writes none -- if its endpoint stops listing the measurement, or stays
-    unanswerable past the grace period.
+    Heartbeat-enabled producers are ended when their heartbeat becomes stale.
+    Other producers are ended when their endpoint omits the measurement or
+    remains unreachable past the grace period.
 
     Args:
         timeout (float): Budget in seconds for each endpoint attempt, applied
             to the connection and to the response separately.
         retries (int): Number of endpoint attempts before declaring failure.
-        stale_after (float): Seconds a producer's heartbeat may go unrefreshed
-            before its measurements are ended. Producers that stamp one are
-            never probed; the rest fall through to the probe below.
-        unreachable_grace (float): Seconds an endpoint may stay unanswerable
-            before the measurements it carried are ended. Applies only to
-            producers with no heartbeat, and only while the endpoint does not
-            answer; an answer settles the question immediately.
+        stale_after (float): Maximum heartbeat age. Producers with heartbeats
+            are not probed.
+        unreachable_grace (float): Maximum outage before records without
+            heartbeats are ended.
         list_measurements (Callable[[str, float], list[str]] | None): Optional probe
             used for testing or custom transports.
 
@@ -542,13 +516,12 @@ def reconcile_live_measurements(
         from qimchi_connect.client import list_live_measurements_sync
 
         def list_measurements(ws_url: str, probe_timeout: float) -> list[str]:
-            """
-            Probe an endpoint with the default synchronous client.
+            """Probe an endpoint with the synchronous client.
 
             Args:
                 ws_url (str): WebSocket endpoint URL.
                 probe_timeout (float): Budget in seconds for the connection
-                    and for the response, applied to each separately.
+                    and response phases.
 
             Returns:
                 list[str]: Dataset identifiers advertised by the endpoint.
@@ -563,19 +536,14 @@ def reconcile_live_measurements(
     by_endpoint: dict[str, list[LiveMeasurement]] = {}
     for record, liveness in _live_records(stale_after):
         if liveness == "beating":
-            # The producer says it is running, so no probe is needed.
+            # A current heartbeat is sufficient evidence of liveness.
             _note_reachable(record.measurement_id)
         elif liveness == "stopped":
-            # The beats stopped. Hiding the row from the live list is not
-            # enough: it still reads live_status = 1, and cleanup only
-            # deletes rows that were ended.
+            # End the row explicitly so retention cleanup can delete it later.
             end_measurement(record.measurement_id)
             stale.append(record.measurement_id)
         else:
-            # No heartbeat to read: a row written through
-            # register_measurement, a publication that opted out of one, or a
-            # producer whose heartbeat thread died while it kept serving. Ask
-            # the endpoint.
+            # Records without a current heartbeat require an endpoint probe.
             by_endpoint.setdefault(record.ws_url, []).append(record)
 
     for ws_url, records in by_endpoint.items():
@@ -594,8 +562,7 @@ def reconcile_live_measurements(
                     )
         for record in records:
             if advertised is not None:
-                # The endpoint answered, so it reports what it serves.
-                # Absent means ended; present clears any earlier miss.
+                # A successful listing is authoritative for this endpoint.
                 if record.measurement_id in advertised:
                     _note_reachable(record.measurement_id)
                 else:

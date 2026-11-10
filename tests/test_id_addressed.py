@@ -1,13 +1,3 @@
-"""
-Tests for publishing and closing a measurement by identifier.
-
-A producer whose publish and close happen in different places -- Qanary
-registers in ``run()`` and closes in a ``finally`` on another method -- can
-address an open publication by its identifier instead of carrying the handle
-between them or keeping its own mapping.
-
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -44,7 +34,6 @@ class TestQanarySnapshotProvider:
         ]
 
     def test_it_sees_writes_made_after_construction(self, store):
-        """The sweep keeps writing; every call re-reads."""
         provider = QanarySnapshotProvider(store)
         first = provider()["signal"].size
 
@@ -54,6 +43,17 @@ class TestQanarySnapshotProvider:
 
         assert first == 3
         assert provider()["signal"].size == 6
+
+    def test_it_reads_a_dict_store_as_qanary_writes_it(self):
+        pytest.importorskip("zarr")
+        store = {}
+        xr.Dataset(
+            {"signal": ("x", np.arange(3.0))}, coords={"x": np.arange(3)}
+        ).to_zarr(store=store, mode="w", zarr_format=2)
+        provider = QanarySnapshotProvider(store)
+
+        assert provider()["signal"].values.tolist() == [0.0, 1.0, 2.0]
+        assert store, "reading must not change the store"
 
     def test_it_describes_itself_as_qanary_zarr(self, store):
         with register_live_measurement("m", QanarySnapshotProvider(store)) as handle:
@@ -112,11 +112,6 @@ class TestIdAddressedOperations:
 
 class TestMaintenanceLogging:
     def test_findings_are_reported_by_the_library(self, store, caplog, monkeypatch):
-        """
-        A producer should not have to import the registry just to log what the
-        sweep found.
-
-        """
         monkeypatch.setattr(
             registry,
             "maintain_registry",

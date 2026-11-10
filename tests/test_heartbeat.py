@@ -1,14 +1,3 @@
-"""
-Producer liveness by heartbeat.
-
-A consumer cannot tell a busy producer from a dead one by probing it: the probe
-budget that would separate them is longer than the poll interval, and a
-measurement process starves its own server thread for longer than either. So
-the producer asserts that it is alive instead, and the registry query filters on
-that assertion rather than on the result of a network round trip.
-
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -21,35 +10,15 @@ from qimchi_connect import producer, registry
 
 
 def _register(measurement_id: str, endpoint: str = "ws://localhost:9000") -> None:
-    """
-    Add a live discovery row.
-
-    Args:
-        measurement_id (str): Identifier for the row.
-        endpoint (str): Advertised WebSocket endpoint.
-
-    """
     registry.register_measurement(measurement_id, None, endpoint, 9000)
 
 
 def _explode(_endpoint: str, _timeout: float) -> list[str]:
-    """
-    Stand in for a probe that must never be reached.
-
-    Args:
-        _endpoint (str): Ignored endpoint URL.
-        _timeout (float): Ignored probe budget.
-
-    Raises:
-        AssertionError: Always.
-
-    """
     raise AssertionError("a beating producer must not be probed")
 
 
 class TestTheRegistryQuery:
     def test_a_beating_producer_is_live_and_is_never_probed(self):
-        """The heartbeat replaces the probe rather than adding to it."""
         _register("beating")
         registry.heartbeat("beating")
 
@@ -66,12 +35,6 @@ class TestTheRegistryQuery:
         assert registry.get_live_measurements(stale_after=0.05) == []
 
     def test_a_producer_that_stops_beating_is_ended_rather_than_left_behind(self):
-        """
-        Hiding the row from the query is not enough. It still reads
-        live_status = 1, and cleanup only deletes ended rows, so it would
-        never be removed.
-
-        """
         _register("stopped")
         registry.heartbeat("stopped")
         time.sleep(0.1)
@@ -85,12 +48,6 @@ class TestTheRegistryQuery:
         assert registry.get_measurement("stopped").live_status is False
 
     def test_a_producer_that_never_beats_is_still_probed(self):
-        """
-        A row can have no heartbeat: register_measurement writes none,
-        publishing can opt out, and the heartbeat thread can die while the
-        producer keeps serving. The endpoint decides in that case.
-
-        """
         _register("legacy")
         probed: list[str] = []
 
@@ -105,12 +62,6 @@ class TestTheRegistryQuery:
         ]
 
     def test_a_heartbeat_stamped_in_another_timezone_still_reads_as_fresh(self):
-        """
-        ISO-8601 sorts lexically only when every stamp carries the same
-        offset. A fresh beat written west of UTC sorts below a UTC cutoff, so
-        comparing the strings would read it as stale.
-
-        """
         _register("west")
         west = datetime.timezone(datetime.timedelta(hours=-5))
         now = datetime.datetime.now(datetime.timezone.utc).astimezone(west)
@@ -136,12 +87,6 @@ class TestTheProducerSide:
             registration.close()
 
     def test_closing_one_of_several_registrations_keeps_the_rest_beating(self):
-        """
-        One thread beats for every open registration, so it stops only when
-        the count reaches zero. Stopping on the first close would leave a
-        running measurement unbeaten.
-
-        """
         dataset = xr.Dataset({"v": ("x", [1.0])}, coords={"x": [0]})
 
         first = producer.register_live_measurement(
@@ -161,11 +106,6 @@ class TestTheProducerSide:
             second.close()
 
     def test_the_first_registration_sets_the_cadence_for_the_rest(self):
-        """
-        The thread is shared, so a later publish keeps the running interval
-        rather than restarting on its own.
-
-        """
         dataset = xr.Dataset({"v": ("x", [1.0])}, coords={"x": [0]})
 
         fast = producer.register_live_measurement(
@@ -185,11 +125,6 @@ class TestTheProducerSide:
             fast.close()
 
     def test_a_heartbeat_slower_than_the_staleness_window_is_warned_about(self, caplog):
-        """
-        Beats further apart than the staleness window leave the measurement
-        absent from the live list between them.
-
-        """
         dataset = xr.Dataset({"v": ("x", [1.0])}, coords={"x": [0]})
 
         with caplog.at_level("WARNING", logger="qimchi_connect.producer"):
@@ -212,7 +147,6 @@ class TestTheProducerSide:
         assert "staleness window" not in caplog.text
 
     def test_closing_the_last_registration_stops_the_heartbeat(self):
-        """A closed measurement must not keep asserting that it is running."""
         dataset = xr.Dataset({"v": ("x", [1.0])}, coords={"x": [0]})
 
         registration = producer.register_live_measurement(
@@ -234,11 +168,6 @@ def test_reconcile_rejects_a_negative_staleness_window():
 
 
 def test_a_heartbeat_for_an_unknown_measurement_is_a_no_op():
-    """
-    The heartbeat thread can beat for a row cleanup already deleted, so this
-    is a no-op rather than an error it has to catch.
-
-    """
     registry.heartbeat("never-registered")
 
     assert registry.get_measurement("never-registered") is None

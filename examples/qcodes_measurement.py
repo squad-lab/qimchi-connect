@@ -1,29 +1,16 @@
-"""
-Stream a QCoDeS measurement to Qimchi while it runs.
+"""Publish a simulated QCoDeS measurement while it runs.
 
 Run with:  python examples/qcodes_measurement.py
 Requires:  pip install qimchi-connect[examples]   (adds qcodes)
 
-While this script is running, Qimchi's Explorer shows a live node for the
-measurement id below that updates as points are added -- no matter where the
-QCoDeS sqlite database itself lives. Once the `with meas.run() as datasaver`
-block exits, Qimchi falls back to reading the finished measurement from that
-sqlite file directly (Qimchi's loader already understands native QCoDeS
-`.db` files).
-
-This mirrors the standard QCoDeS pattern from
+The example follows the standard QCoDeS pattern from
 https://microsoft.github.io/Qcodes/examples/DataSet/Performing-measurements-using-qcodes-parameters-and-dataset.html
--- the only addition is wrapping `datasaver` in a `QCoDeSSnapshotProvider`
-and handing that to `live_measurement`.
+and adds ``QCoDeSSnapshotProvider`` plus ``live_measurement``. Qimchi reads the
+SQLite database after live publication ends.
 
-A generic producer would pass
-`snapshot=lambda: datasaver.dataset.to_xarray_dataset()`. That does not work
-for QCoDeS: the run's sqlite connection is thread-affine and its writes are
-batched, so the callback raises `sqlite3.ProgrammingError` on the server
-thread and can return stale data otherwise. `QCoDeSSnapshotProvider` handles
-both -- see its docstring. Use its `add_result` in place of
-`datasaver.add_result` and the live snapshot keeps itself current.
-
+QCoDeS binds its SQLite connection to the measurement thread and buffers
+writes. The provider handles both constraints; use its ``add_result`` method
+instead of calling ``datasaver.add_result`` directly.
 """
 
 from __future__ import annotations
@@ -44,14 +31,14 @@ from qcodes.instrument_drivers.mock_instruments import (
 
 from qimchi_connect import QCoDeSSnapshotProvider, live_measurement
 
-# Tunables, kept at module scope so the tests can shrink the run.
+# Module-level settings let the tests shorten the run.
 VOLTAGES = [i / 10 for i in range(-50, 51)]
 POINT_DELAY = 0.05
 
 
 def main(db_path: Path | None = None) -> Path:
     """
-    Run a dummy QCoDeS sweep, published live for the duration.
+    Run and publish a simulated QCoDeS sweep.
 
     Args:
         db_path (Path | None): Where to put the QCoDeS sqlite database.
@@ -77,10 +64,10 @@ def main(db_path: Path | None = None) -> Path:
 
     try:
         with meas.run() as datasaver:
-            # Wrap the datasaver in a live snapshot provider for Qimchi
+            # The provider reads QCoDeS data on the measurement thread.
             live = QCoDeSSnapshotProvider(datasaver)
 
-            # live_measurement seeds the provider's cache before publishing
+            # Registration creates the initial cached snapshot.
             with live_measurement(
                 measurement_id=f"qcodes-{datasaver.dataset.captured_run_id}",
                 snapshot=live,
@@ -89,13 +76,11 @@ def main(db_path: Path | None = None) -> Path:
                 for voltage in VOLTAGES:
                     dac.ch1.set(voltage)
                     reading = dmm.v1.get()
-                    # Records the point and refreshes the live snapshot, which
-                    # is throttled internally -- see QCoDeSSnapshotProvider.
+                    # Record the point and refresh the cache when due.
                     live.add_result((dac.ch1, voltage), (dmm.v1, reading))
                     time.sleep(POINT_DELAY)  # replace with real timing
 
-                # The loop's last refresh may have been throttled away, so make
-                # the published snapshot final before the registration closes.
+                # Ensure the final point is included before publication closes.
                 live.refresh(force=True)
     finally:
         Instrument.close_all()

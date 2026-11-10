@@ -1,14 +1,3 @@
-"""
-Tests for the binary snapshot wire format.
-
-``snapshot_payload(dataset, binary=True)`` moves numeric and boolean arrays
-out of the JSON body and into a raw byte blob (``pack_snapshot`` /
-``unpack_snapshot``). The round trip is exact for every dtype Qanary
-produces, the framed message is smaller than the JSON one, and a truncated
-message raises.
-
-"""
-
 import asyncio
 
 import numpy as np
@@ -25,7 +14,6 @@ from qimchi_connect.protocol import (
 
 
 def _measurement_shaped_dataset(size: int = 40) -> xr.Dataset:
-    """A dataset shaped like a live Qanary measurement: 2D float grid, metadata."""
     return xr.Dataset(
         {"signal": (("x", "y"), np.random.default_rng(0).random((size, size)))},
         coords={
@@ -37,8 +25,6 @@ def _measurement_shaped_dataset(size: int = 40) -> xr.Dataset:
 
 
 class TestBinaryRoundTrip:
-    """``pack_snapshot`` -> ``unpack_snapshot`` must reconstruct exactly."""
-
     def test_a_realistic_measurement_grid_round_trips_exactly(self):
         dataset = _measurement_shaped_dataset()
 
@@ -75,7 +61,6 @@ class TestBinaryRoundTrip:
             np.testing.assert_array_equal(restored["v"].values, values)
 
     def test_a_measurement_with_no_binary_eligible_variables_still_round_trips(self):
-        """An all-string/complex dataset: binary_vars is empty, blob is empty."""
         dataset = xr.Dataset(
             {"label": ("i", np.array(["a", "bb"], dtype=object))},
             coords={"i": np.array(["x", "y"], dtype=object)},
@@ -91,8 +76,6 @@ class TestBinaryRoundTrip:
 
 
 class TestSmallerOnTheWire:
-    """The framed message must be smaller than the all-JSON payload."""
-
     def test_binary_framing_is_smaller_than_the_all_json_payload(self):
         import json
 
@@ -110,8 +93,6 @@ class TestSmallerOnTheWire:
 
 
 class TestServerResponses:
-    """get_snapshot always answers with the binary framing."""
-
     def test_the_numeric_variables_ride_the_binary_payload(self):
         dataset = _measurement_shaped_dataset(size=8)
         server.register_snapshot_provider("target", lambda: dataset)
@@ -133,8 +114,6 @@ class TestServerResponses:
 
 
 class TestEndToEndOverTheRealSocket:
-    """open_live_measurement over a real connection, as a consumer uses it."""
-
     def test_open_live_measurement_reconstructs_a_large_grid_exactly(self):
         dataset = _measurement_shaped_dataset(size=200)
         server.register_snapshot_provider("wire-target", lambda: dataset)
@@ -146,7 +125,6 @@ class TestEndToEndOverTheRealSocket:
         xr.testing.assert_identical(restored, dataset)
 
     def test_send_request_decodes_a_hand_built_snapshot_request(self):
-        """send_request's binary/text dispatch must not depend on the action."""
         dataset = _measurement_shaped_dataset(size=8)
         server.register_snapshot_provider("raw-wire", lambda: dataset)
         assert server.start_live_server(port=0)
@@ -165,8 +143,6 @@ class TestEndToEndOverTheRealSocket:
 
 
 class TestTruncationIsDetected:
-    """A cut-off binary message must raise, not silently misread the blob."""
-
     def test_a_message_shorter_than_its_declared_arrays_raises(self):
         dataset = xr.Dataset(
             {"v": ("i", np.arange(100, dtype=np.int64))}, coords={"i": np.arange(100)}

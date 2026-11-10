@@ -1,17 +1,3 @@
-"""
-Tests for QuantifySnapshotProvider.
-
-Quantify flushes the in-progress dataset to disk as it acquires and
-``load_dataset`` re-reads it, so unlike QCoDeS there is no thread affinity to
-work around. What the class owns is the convention -- id, disk path, producer
-metadata -- and the window at the start of a run where the file is not yet
-readable.
-
-These tests use a fake ``quantify_core`` module because it is an optional
-dependency. The fake module also records how the provider calls Quantify.
-
-"""
-
 from __future__ import annotations
 
 import sys
@@ -27,8 +13,6 @@ TUID = "20260904-101500-123-abcdef"
 
 
 class FakeQuantify:
-    """Stands in for quantify_core.data.handling."""
-
     def __init__(self, container=None, dataset=None, error=None):
         self.container = container
         self.dataset = dataset
@@ -49,7 +33,6 @@ class FakeQuantify:
 
 @pytest.fixture
 def quantify(monkeypatch):
-    """Install a fake quantify_core for the duration of a test."""
     fake = FakeQuantify(dataset=xr.Dataset({"z": ("dim_0", np.arange(4.0))}))
 
     handling = types.ModuleType("quantify_core.data.handling")
@@ -85,7 +68,6 @@ class TestConventions:
         )
 
     def test_the_disk_path_is_absent_before_the_container_exists(self, quantify):
-        """Publishing can start before Quantify has created the directory."""
         quantify.container = None
 
         assert QuantifySnapshotProvider(TUID).disk_path is None
@@ -96,7 +78,6 @@ class TestReading:
         assert QuantifySnapshotProvider(TUID)()["z"].size == 4
 
     def test_it_re_reads_on_every_call(self, quantify):
-        """The run is still acquiring; a cached first read would freeze it."""
         provider = QuantifySnapshotProvider(TUID)
 
         provider()
@@ -106,11 +87,6 @@ class TestReading:
         assert quantify.loads == 2
 
     def test_an_unreadable_dataset_yields_an_empty_dataset_not_an_error(self, quantify):
-        """
-        Quantify rewrites the file as it acquires, so a client polling during a
-        write must not get an exception instead of the run.
-
-        """
         quantify.error = OSError("file is being written")
 
         assert list(QuantifySnapshotProvider(TUID)().data_vars) == []

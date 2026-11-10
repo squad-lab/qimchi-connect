@@ -1,7 +1,4 @@
-"""
-Serialization helpers for the Qimchi live xarray protocol.
-
-"""
+"""Serialization for the Qimchi live-data protocol."""
 
 from __future__ import annotations
 
@@ -17,23 +14,19 @@ import xarray as xr
 
 PROTOCOL_NAME = "qimchi-connect"
 PROTOCOL_VERSION = 1
-MAX_MESSAGE_SIZE = (
-    1000 * 1024 * 1024
-)  # 1000 MiB, to allow a 1 GiB snapshot with some JSON overhead, for larger measurements.
+# Leave room for JSON metadata alongside a large snapshot.
+MAX_MESSAGE_SIZE = 1000 * 1024 * 1024
 
-# Binary snapshot framing: a 4-byte big-endian header length, the JSON header
-# itself, then every binary variable's raw bytes concatenated in the order
-# ``binary_vars`` lists them. websockets dispatches on the Python type passed
-# to ``send()`` -- ``bytes`` becomes a binary frame, ``str`` a text one -- so
-# the whole message takes one send/recv.
+# A binary snapshot contains a 4-byte header length, a JSON header, and the raw
+# arrays in ``binary_vars`` order. The entire snapshot fits in one WebSocket
+# binary frame.
 _HEADER_LENGTH = struct.Struct(">I")
 
 _BYTES_MARKER = "__qimchi_connect_bytes__"
 _COMPLEX_MARKER = "__qimchi_connect_complex__"
 
 
-# Array kinds whose ``tolist()`` already yields JSON-ready Python scalars, so the
-# per-element conversion walk can be skipped entirely.
+# These dtypes produce JSON-compatible scalars directly from ``tolist()``.
 _PLAIN_ARRAY_KINDS = frozenset("biuf")
 
 
@@ -41,8 +34,7 @@ def json_default(value: Any) -> Any:
     """
     Convert one value that a JSON encoder could not serialize on its own.
 
-    Intended as the ``default`` hook of :func:`json.dumps`, so payloads that are
-    already JSON-compatible are serialized without a second conversion walk.
+    Use this as the ``default`` hook for :func:`json.dumps`.
 
     Args:
         value (Any): Value rejected by the JSON encoder.
@@ -124,17 +116,16 @@ def decode_json_value(value: Any) -> Any:
 
 def append_dim(dataset: xr.Dataset) -> str | None:
     """
-    Return the dimension a sweep grows along, if the dataset has one.
+    Find the shared leading dimension used for incremental snapshots.
 
-    That is the first dimension of every data variable. A dataset whose
-    variables disagree about it -- or that has none -- cannot be served in
-    row-wise pieces, and the caller falls back to whole snapshots.
+    All data variables must have the same leading dimension. Otherwise the
+    dataset cannot be split into rows.
 
     Args:
         dataset (xr.Dataset): Dataset to inspect.
 
     Returns:
-        str | None: The shared leading dimension, or None when there is none.
+        str | None: The shared leading dimension, if one exists.
 
     """
     dims = [var.dims for var in dataset.data_vars.values()]
@@ -148,22 +139,18 @@ def append_dim(dataset: xr.Dataset) -> str | None:
 
 def row_frontier(dataset: xr.Dataset, dim: str) -> int:
     """
-    Return how many leading rows of ``dim`` have been written.
+    Count the written rows along ``dim``.
 
-    A producer that preallocates its grid -- as a Qanary sweep does, so the
-    axes are known from the start -- leaves the not-yet-measured tail as NaN.
-    Everything up to the last row holding a finite value is what a consumer
-    could plot, and rows past it carry no information to send.
-
-    A variable whose dtype has no NaN (integers, booleans) cannot be probed
-    this way, so its full length is reported rather than guessing.
+    Preallocated floating-point grids use NaN for unwritten rows. The last row
+    containing a finite value defines the frontier. Integer and boolean arrays
+    cannot represent unwritten rows, so their full length is returned.
 
     Args:
         dataset (xr.Dataset): Dataset to inspect.
         dim (str): Dimension to measure along.
 
     Returns:
-        int: Number of leading rows written, 0 when nothing has been.
+        int: Number of leading rows containing data.
 
     """
     total = int(dataset.sizes.get(dim, 0))
@@ -190,17 +177,15 @@ def snapshot_payload(dataset: xr.Dataset, *, binary: bool = False) -> dict[str, 
     """
     Serialize an xarray dataset into the live snapshot representation.
 
-    The server typically always asks for ``binary=True``. The JSON-only form is kept as a
-    supported output -- for a transport that cannot carry binary frames, and
-    for reading a snapshot.
+    The server uses the binary form. The JSON-only form remains available for
+    transports that cannot carry binary frames.
 
     Args:
         dataset (xr.Dataset): Dataset snapshot to serialize.
         binary (bool): If ``True``, numeric and boolean variables are left out
-            of ``data`` and listed in ``binary_vars`` instead, for the caller
-            to send as a raw byte blob (see :func:`pack_snapshot`). Complex,
-            datetime, byte-string and object-dtype variables stay JSON-encoded
-            in ``data`` either way.
+            of ``data`` and listed in ``binary_vars`` for
+            :func:`pack_snapshot`. Complex, datetime, byte-string, and object
+            arrays remain JSON-encoded.
 
     Returns:
         dict[str, Any]: The snapshot fields. With ``binary=True``, also
@@ -248,8 +233,7 @@ def pack_snapshot(payload: Mapping[str, Any], dataset: xr.Dataset) -> bytes:
     Args:
         payload (Mapping[str, Any]): Result of ``snapshot_payload(dataset,
             binary=True)``. Must carry a ``binary_vars`` field.
-        dataset (xr.Dataset): The dataset ``payload`` was built from -- the
-            source of the raw bytes for each name in ``binary_vars``.
+        dataset (xr.Dataset): Source of the arrays listed in ``binary_vars``.
 
     Returns:
         bytes: ``[4-byte header length][JSON header][concatenated raw arrays]``,
@@ -269,11 +253,8 @@ def unpack_snapshot(raw: bytes) -> dict[str, Any]:
         raw (bytes): A message produced by :func:`pack_snapshot`.
 
     Returns:
-        dict[str, Any]: The snapshot payload, with ``data`` filled in for the
-            binary variables too -- each already a correctly shaped
-            ``numpy.ndarray`` rather than a JSON-decoded list, so
-            :func:`measurement_from_snapshot` can use it directly. Those arrays
-            are read-only views over ``raw``; copy one before writing to it.
+        dict[str, Any]: Snapshot payload with binary variables restored as
+            shaped, read-only NumPy arrays backed by ``raw``.
 
     Raises:
         ValueError: If a binary variable's declared shape and dtype do not
@@ -314,11 +295,8 @@ def measurement_from_snapshot(snapshot: dict[str, Any]) -> xr.Dataset:
         snapshot (dict[str, Any]): Snapshot returned by a live server.
 
     Returns:
-        xr.Dataset: Reconstructed dataset with variable metadata. Variables
-            that arrived over the binary path are backed by read-only arrays,
-            since a snapshot is a view of someone else's running measurement
-            and is meant to be read rather than modified in place. Use
-            ``.copy()`` on a variable that has to be written to.
+        xr.Dataset: Dataset with variable metadata restored. Binary variables
+            are read-only; copy them before modification.
 
     """
     coordinate_names: list[str] = snapshot.get("coords", [])
@@ -340,8 +318,7 @@ def measurement_from_snapshot(snapshot: dict[str, Any]) -> xr.Dataset:
 
         """
         raw_value = values[name]
-        # unpack_snapshot reconstructs binary variables as arrays of the
-        # declared shape and dtype; they need no JSON decoding.
+        # Binary variables are already decoded by unpack_snapshot.
         if isinstance(raw_value, np.ndarray):
             return raw_value
 

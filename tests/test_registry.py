@@ -71,11 +71,6 @@ def test_maintenance_marks_stale_before_retention_without_deleting_it():
 
 
 def test_the_probe_budget_covers_the_connection_as_well_as_the_response():
-    """
-    Registration reconciles by default, so an endpoint that is slow to accept
-    a connection delays every measurement start until the budget is spent.
-
-    """
     from qimchi_connect import client
 
     budgets: list[tuple[float, float]] = []
@@ -111,7 +106,6 @@ def test_cleanup_rejects_a_negative_retention():
 
 
 def test_the_registry_round_trips_a_measurement_through_its_lifecycle():
-    """Register, look up, move on disk, then end -- the Qanary sequence."""
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     registry.register_measurement(
         "old", "/tmp/old.nc", "ws://localhost:9000", 9000, started
@@ -130,11 +124,6 @@ def test_the_registry_round_trips_a_measurement_through_its_lifecycle():
 
 
 def test_the_default_registry_lives_in_qimchis_home(monkeypatch, tmp_path):
-    """
-    Every producer publishes into the one file Qimchi reads, so the registry
-    belongs in Qimchi's home rather than any single producer's.
-
-    """
     monkeypatch.delenv("QIMCHI_HOME", raising=False)
     monkeypatch.setattr(registry.Path, "home", staticmethod(lambda: tmp_path))
     registry.configure_database(None)
@@ -146,11 +135,6 @@ def test_the_default_registry_lives_in_qimchis_home(monkeypatch, tmp_path):
 
 
 def test_qimchi_home_moves_the_registry(monkeypatch, tmp_path):
-    """
-    ``QIMCHI_HOME`` is what Qimchi itself honours, so a moved home has to move
-    the registry too -- otherwise the viewer and its producers disagree.
-
-    """
     home = tmp_path / "elsewhere"
     monkeypatch.setenv("QIMCHI_HOME", str(home))
     registry.configure_database(None)
@@ -162,7 +146,6 @@ def test_qimchi_home_moves_the_registry(monkeypatch, tmp_path):
 
 
 def test_qimchi_home_expands_the_user_directory(monkeypatch, tmp_path):
-    """Producer and viewer must resolve a tilde-prefixed override equally."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("QIMCHI_HOME", "~/elsewhere")
@@ -196,27 +179,10 @@ def test_a_failed_statement_rolls_the_transaction_back():
 
 
 def _unreachable(_endpoint: str, _timeout: float) -> list[str]:
-    """
-    Stand in for a producer that never replies.
-
-    Args:
-        _endpoint (str): Ignored endpoint URL.
-        _timeout (float): Ignored probe budget.
-
-    Raises:
-        TimeoutError: Always.
-
-    """
     raise TimeoutError
 
 
 def test_an_unreachable_endpoint_survives_a_single_reconcile_round():
-    """
-    An unanswered probe says nothing about the producer: a measurement
-    process starves its own server thread past any usable budget. Ending the
-    record on that evidence unregisters a running measurement.
-
-    """
     _register("running")
 
     stale = registry.reconcile_live_measurements(
@@ -230,7 +196,6 @@ def test_an_unreachable_endpoint_survives_a_single_reconcile_round():
 
 
 def test_an_endpoint_unreachable_past_the_grace_period_is_ended():
-    """A producer that really is gone still has to leave the live list."""
     _register("crashed")
 
     assert (
@@ -259,12 +224,6 @@ def test_an_endpoint_unreachable_past_the_grace_period_is_ended():
 
 
 def test_one_answer_restarts_the_grace_period():
-    """
-    Contention is bursty, so the window is measured from the last answer. A
-    running total would accumulate unrelated misses and eventually end a live
-    measurement.
-
-    """
     _register("flaky")
     answers: list[list[str] | None] = [None, ["flaky"], None]
 
@@ -287,11 +246,6 @@ def test_one_answer_restarts_the_grace_period():
 
 
 def test_an_answering_endpoint_ends_a_measurement_it_does_not_list_at_once():
-    """
-    An endpoint that answers reports what it serves, so no grace period
-    applies.
-
-    """
     _register("finished")
 
     stale = registry.reconcile_live_measurements(
@@ -305,7 +259,6 @@ def test_an_answering_endpoint_ends_a_measurement_it_does_not_list_at_once():
 
 
 def test_registering_a_measurement_starts_it_with_a_clean_probe_record():
-    """Ports get reused, so a fresh registration must not inherit misses."""
     _register("reused")
     registry.reconcile_live_measurements(
         timeout=0.25,

@@ -1,18 +1,13 @@
-# Run `uv run pre-commit install` once per clone (after `uv sync --extra dev`).
+# After installing the dev extra, run `uv run pre-commit install` once.
 #
-# Rules live in pyproject.toml ([tool.ruff]), so these hooks apply exactly the
-# same configuration as a local `ruff check` / `ruff format`.
+# Ruff reads its settings from pyproject.toml, both here and on the command line.
 #
-# `rev` is pinned to an exact ruff release, and pyproject.toml's `dev` extra and
-# the CI `lint` job pin the same one. Bump all three together, and bump them
-# regularly: ruff ships often, and its formatter output does change between
-# releases.
+# Keep `rev` aligned with the `dev` extra and CI lint job.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.6
     hooks:
-      # Import sorting is part of `ruff check` via the "I" rules; the formatter
-      # does not do it.
+      # Ruff's I rules sort imports; the formatter does not.
       - id: ruff-check
         args: [--fix]
       - id: ruff-format

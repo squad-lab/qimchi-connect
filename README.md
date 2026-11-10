@@ -7,27 +7,9 @@
 [![PyPI version](https://img.shields.io/pypi/v/qimchi-connect)](https://pypi.org/project/qimchi-connect/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23536727.svg)](https://doi.org/10.5281/zenodo.23536727)
 
-`qimchi-connect` publishes real-time `xarray.Dataset` snapshots to Qimchi without
-requiring a specific measurement framework or storage format.
-
-To publish a measurement, provide a callback that returns the current
-`xarray.Dataset`. Built-in providers support QCoDeS, Qanary, and Quantify.
-
----
-
-- [Qimchi-Connect](#qimchi-connect)
-  - [Installation](#installation)
-  - [Publishing a measurement](#publishing-a-measurement)
-  - [Following a measurement incrementally](#following-a-measurement-incrementally)
-  - [Supported frameworks](#supported-frameworks)
-  - [Runnable examples](#runnable-examples)
-  - [Repairing discovery records](#repairing-discovery-records)
-  - [Runtime behavior](#runtime-behavior)
-  - [Development](#development)
-  - [Citing Qimchi-Connect](#citing-qimchi-connect)
-  - [License](#license)
-
----
+Qimchi-Connect lets Qimchi display an `xarray.Dataset` while a measurement is
+still running. It works with any acquisition code that can return a consistent
+snapshot, and includes providers for QCoDeS, Qanary, and Quantify.
 
 ## Installation
 
@@ -37,29 +19,27 @@ Install the latest release from PyPI:
 pip install qimchi-connect
 ```
 
-For a project managed with `uv`:
+With `uv`:
 
 ```console
 uv add qimchi-connect
 ```
 
-To install the latest development version from the `preview` branch:
+Install the current `preview` branch with:
 
 ```console
 pip install "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@preview"
 ```
 
-For a project managed with `uv`:
+Or, with `uv`:
 
 ```console
 uv add "qimchi-connect @ git+https://gitlab.com/squad-lab/qimchi-connect.git@preview"
 ```
 
-Qimchi-Connect requires Python 3.13 or later. Python 3.13 is recommended, and
-CI also tests Python 3.14.
+Qimchi-Connect requires Python 3.13 or later. CI tests Python 3.13 and 3.14.
 
-Optional extras are listed below. For example, install the Quantify extra with
-`pip install "qimchi-connect[quantify]"`.
+Optional dependencies are grouped into extras:
 
 | Extra | Adds | For |
 |---|---|---|
@@ -70,11 +50,10 @@ Optional extras are listed below. For example, install the Quantify extra with
 
 ## Publishing a measurement
 
-The snapshot callback is evaluated when a client requests data. It should
-return a consistent view of the measurement and use the producer's own lock
-when the underlying data can change concurrently. The server takes ownership
-of each returned dataset, materializes it, and closes its backing resources;
-return a snapshot rather than the producer's owned dataset.
+Pass `live_measurement` a callback that returns the latest dataset. The callback
+runs when a client asks for data and may run on another thread, so protect
+shared state with the same lock used by the acquisition code. Return a new
+snapshot: the server loads it into memory and closes it after reading.
 
 ```python
 from qimchi_connect import live_measurement
@@ -89,9 +68,9 @@ with live_measurement(
 
 ## Following a measurement incrementally
 
-For a grid that grows along one shared leading dimension, clients can avoid
-downloading the rows they already hold. The first response is a full snapshot;
-its row metadata supplies the offset for the next request:
+If every data variable grows along the same leading dimension, a client can
+fetch only the rows added since its previous request. Use the row count from
+the first response as the next offset:
 
 ```python
 from qimchi_connect import open_live_measurement_sync
@@ -107,23 +86,24 @@ if progress is not None:
     )
 ```
 
-The returned `delta` contains only the missing rows. Its
-`encoding["qimchi_connect_rows"]` records the append dimension, the first row
-returned, the current written frontier, and the preallocated total. The client
-does not merge the delta automatically. Older servers ignore `since_rows`, and
-datasets without a common leading dimension continue to return full snapshots.
+`delta` contains the new rows but is not merged into the earlier dataset. Its
+`encoding["qimchi_connect_rows"]` contains the append dimension, returned
+offset, written row count, and allocated size. Older servers ignore
+`since_rows`, and datasets without a shared leading dimension are always sent
+in full.
 
 ## Supported frameworks
 
-Pass a framework provider to `live_measurement` instead of a callback. A
-provider can prepare the first snapshot, set `source_package`, and derive the
-measurement ID and disk path.
+Framework providers handle details that do not fit a plain callback, such as
+thread-bound database handles or framework-specific paths and metadata.
 
-> [!tip]
-> The WebSocket server runs on a background thread. A framework handle may not be safe to read from that thread. For example, QCoDeS uses a thread-bound SQLite connection and batches writes. Direct calls to `datasaver.dataset.to_xarray_dataset()` from the server thread can raise `sqlite3.ProgrammingError`, and reads may not include the latest result.
+The WebSocket server runs on a background thread. QCoDeS, however, binds its
+SQLite connection to the measurement thread and buffers writes. Reading a
+`datasaver` directly from the server can therefore raise
+`sqlite3.ProgrammingError` or return stale data.
 
-`QCoDeSSnapshotProvider` manages the cache, locking, write flushing, and refresh
-rate:
+`QCoDeSSnapshotProvider` handles locking, buffered writes, snapshot caching,
+and refresh rate limiting:
 
 ```python
 # QCoDeS
@@ -137,12 +117,13 @@ with meas.run() as datasaver:
             live.add_result((dac.ch1, voltage), (dmm.v1, dmm.v1.get()))
 ```
 
-The provider prepares a snapshot before registration and sets the run's
-`source_package`. See `examples/qcodes_measurement.py` for a complete example.
-
+The provider creates an initial snapshot before registration and sets the
+run's `source_package`. See `examples/qcodes_measurement.py` for a complete
+example.
 
 `QuantifySnapshotProvider` derives the measurement ID and disk path from a
-tuid. It retries when `dataset.hdf5` is not yet readable at the start of a run.
+TUID. It retains the previous snapshot when `dataset.hdf5` is temporarily
+unreadable.
 Install it with `pip install "qimchi-connect[quantify]"`.
 
 ```python
@@ -164,22 +145,21 @@ from qimchi_connect import QanarySnapshotProvider, register_live_measurement
 register_live_measurement(measurement_id, QanarySnapshotProvider(memory_store))
 ```
 
-Qanary was called qcutils up to and including Qimchi-Connect 0.1.0, where this
-provider was named `QCUtilsSnapshotProvider`. That name was removed. Please import
-`QanarySnapshotProvider` instead.
+In Qimchi-Connect 0.1.0 and earlier, Qanary was called qcutils and the provider
+was named `QCUtilsSnapshotProvider`. Those names are no longer supported.
 
 See [Adding a framework](CONTRIBUTING.md#adding-a-framework) to support another
 framework.
 
 ## Runnable examples
 
-The examples do not require hardware. All three call
-`qimchi_connect.live_measurement`; only the `snapshot` argument differs.
+All examples run without hardware:
 
 - [`examples/qcodes_measurement.py`](examples/qcodes_measurement.py) uses
   `QCoDeSSnapshotProvider` with a standard QCoDeS `Measurement` and `datasaver`.
-  The provider manages the snapshot cache, locking, write flushing, and refresh
-  rate. Install its dependency with `pip install qimchi-connect[examples]`.
+  The provider handles locking, buffered writes, snapshot caching, and refresh
+  rate limiting. Install its dependency with
+  `pip install qimchi-connect[examples]`.
 - [`examples/quantify_measurement.py`](examples/quantify_measurement.py) uses
   `QuantifySnapshotProvider` with a two-dimensional Quantify
   `MeasurementControl` sweep. A discovery thread publishes the TUID that
@@ -189,18 +169,18 @@ The examples do not require hardware. All three call
   acquisition loop that updates a locked NumPy array and exposes it as an
   `xarray.Dataset`. Use this pattern for frameworks without a provider.
 
-`tests/test_examples.py` runs all three scripts. When adding an example, add a
-test for it in that file. `test_every_example_is_covered_by_a_test` checks this
-requirement.
+`tests/test_examples.py` runs each script. Add a matching test when adding an
+example.
 
-There is no separate Qanary script in this directory because Qanary already
-includes higher-level examples based on `qanary.measure.run` and `Sweep`.
+Qanary already provides higher-level examples based on `qanary.measure.run`
+and `Sweep`, so this repository does not include a separate Qanary script.
 
 ## Repairing discovery records
 
-Registration checks records marked as live. It marks a record as ended when
-the endpoint remains unavailable after retries or no longer advertises the
-recorded dataset. It then deletes ended records older than seven days.
+Before registering a measurement, Qimchi-Connect checks existing live records.
+Records are ended when their heartbeat expires, their endpoint no longer lists
+the measurement, or the endpoint remains unreachable past the grace period.
+Ended records are deleted after seven days.
 
 Run the same maintenance manually with:
 
@@ -208,36 +188,32 @@ Run the same maintenance manually with:
 qimchi-connect cleanup --retention-days 7
 ```
 
-The discovery database is stored in Qimchi's application directory --
-`$QIMCHI_HOME/live_measurements.db`, or `~/.qimchi/live_measurements.db` by
-default. Every producer publishes into the one file Qimchi reads, so it belongs
-with the viewer rather than under any single measurement package.
+The discovery database is `$QIMCHI_HOME/live_measurements.db`, which defaults
+to `~/.qimchi/live_measurements.db`. All producers write to the same database
+that Qimchi reads.
 
-Up to 0.1.0 it lived at `~/.qcutils/live_measurements.db`. Nothing is migrated:
-the registry only holds live and recently-ended runs and repopulates as soon as
-producers publish again, so upgrade your producers and Qimchi together and
-delete the old `~/.qcutils` afterwards.
+Version 0.1.0 and earlier used `~/.qcutils/live_measurements.db`. That database
+is not migrated because it contains only live and recently ended runs. Upgrade
+Qimchi and its producers together, then remove the old `~/.qcutils` directory.
 
 ## Runtime behavior
 
-**One server per process.** The WebSocket server is process-wide. The first
-`live_measurement` call starts it. Later calls use the same server. The `host`
-and `port` arguments apply only to the call that starts the server. Each
-registration advertises the active server.
+**One server per process.** The first `live_measurement` call starts the
+WebSocket server; later calls reuse it. Only the first call's `host` and `port`
+take effect.
 
 **Snapshots are read-only.** Numeric and boolean variables are transferred as
 raw bytes and received as read-only NumPy arrays. Call `.copy()` before
 modifying a variable.
 
-**The callback runs on the server thread.** It runs when a client requests data.
-Use a lock and return a copy instead of a live buffer. See
-`examples/generic_producer.py`. Use `QCoDeSSnapshotProvider` for QCoDeS.
+**Callbacks run on the server thread.** Protect shared data with a lock and
+return a copy, not a live buffer. See `examples/generic_producer.py`. QCoDeS
+code should use `QCoDeSSnapshotProvider`.
 
-**Snapshot caching is configurable.** Responses for the same measurement share
-one serialized snapshot for 0.25 seconds by default. Set
-`QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds to tune the
-freshness/serialization tradeoff. Zero disables cache hits. Invalid values are
-ignored with a warning and use the default.
+**Snapshot caching is configurable.** By default, requests for the same
+measurement reuse a serialized snapshot for 0.25 seconds. Set
+`QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds; zero disables
+cache hits. Invalid values emit a warning and use the default.
 
 ## Development
 
@@ -269,12 +245,13 @@ Please cite Qimchi-Connect when using it in your work:
 }
 ```
 
-This DOI covers all archived releases. To cite a specific version, use its DOI from the
-[Zenodo record](https://doi.org/10.5281/zenodo.23536727).
+This DOI covers all archived releases. To cite a specific version, use its DOI
+from the [Zenodo record](https://doi.org/10.5281/zenodo.23536727).
 [CITATION.cff](CITATION.cff) has the same information in machine-readable form.
 
 ## License
 
-Qimchi-Connect is free software under the [AGPL-3.0-or-later](LICENSE). Dependencies are installed separately under their own licenses.
+Qimchi-Connect is free software under the [AGPL-3.0-or-later](LICENSE).
+Dependencies are installed separately under their own licenses.
 
 Copyright © 2026 Forschungszentrum Jülich GmbH, PGI-11.

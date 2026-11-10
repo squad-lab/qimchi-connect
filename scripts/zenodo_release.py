@@ -1,18 +1,16 @@
-"""
-Archive a stable release on Zenodo using metadata from CITATION.cff.
+"""Archive a stable release on Zenodo.
 
-Each release has its own version DOI and shares the project's concept DOI.
-The script reads metadata from CITATION.cff, the README copyright line and
-the release's CHANGELOG section. It preserves fields not managed by the script,
-such as funding, from the previous version.
+Metadata comes from ``CITATION.cff``, the README copyright line, and the
+release's changelog entry. Existing fields that this script does not manage,
+such as funding, are preserved.
 
     python scripts/zenodo_release.py --tag v1.2.3 --file source.zip
 
 Environment:
     ZENODO_TOKEN        personal access token (deposit:write, deposit:actions)
     ZENODO_URL          default https://zenodo.org (https://sandbox.zenodo.org to test)
-    ZENODO_CONCEPT_ID   existing concept record ID; if unset, search the user's
-                        uploads by title or create a record if none match
+    ZENODO_CONCEPT_ID   existing concept record ID; if unset, find it by title
+                        or create a new record
     ZENODO_DRY_RUN=1    print the metadata and stop, without network access
 
 Requires PyYAML.
@@ -36,7 +34,7 @@ from typing import Any
 
 import yaml
 
-# CITATION.cff has no field for a creator's role or an affiliation's ROR ID.
+# These Zenodo fields have no CITATION.cff equivalent.
 CREATOR_ROLES = {"0000-0003-1522-7403": "projectleader"}  # Vincent Mourik
 AFFILIATION_IDS = {"Forschungszentrum Jülich": "02nv7yv05"}
 
@@ -74,7 +72,7 @@ def release_notes(changelog: Path, version: str) -> str | None:
         return None
     level = len(heading.match(lines[start])[1])
 
-    # Parse paragraphs, subheadings and lists. Join wrapped lines.
+    # Parse headings, paragraphs, and lists while joining wrapped lines.
     blocks: list[str] = []
     for line in lines[start + 1 :]:
         title = re.match(r"^(#+)\s+(.*)", line)
@@ -214,12 +212,12 @@ class Zenodo:
     ) -> Any:
         if not url.startswith("http"):
             url = self.api + url
-        # The token goes with every request, so never follow a link off Zenodo.
+        # Never send the bearer token outside the configured Zenodo API.
         if not url.startswith(self.api + "/"):
             sys.exit(f"Refusing to send the Zenodo token to {url}")
         headers = {
             "Authorization": f"Bearer {self.token}",
-            # Request the InvenioRDM response format.
+            # Request the InvenioRDM representation used below.
             "Accept": "application/vnd.inveniordm.v1+json",
             **(headers or {}),
         }
@@ -237,7 +235,7 @@ class Zenodo:
         return json.loads(body) if body else None
 
     def own_records(self, query: str) -> list[dict[str, Any]]:
-        """Return all versions and drafts of the user's records that match the query."""
+        """Return matching record versions and drafts owned by the user."""
         found: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -255,8 +253,7 @@ def as_input(value: Any) -> Any:
     """
     Convert Zenodo response metadata to the accepted input format.
 
-    Keep only the ID for vocabulary references, such as licenses, affiliations
-    and roles. Zenodo rejects expanded fields, such as titles, in update requests.
+    Vocabulary references accept only their IDs in update requests.
     """
     if isinstance(value, list):
         return [as_input(item) for item in value]
@@ -271,9 +268,8 @@ def merge_into_draft(draft: dict[str, Any], body: dict[str, Any]) -> dict[str, A
     """
     Merge generated metadata into the draft and preserve other fields.
 
-    Replace fields managed by this script. Preserve other metadata, such as
-    funding and contributors. Remove the previous release's repository links
-    and release notes.
+    Replace fields managed here, preserve fields such as funding and
+    contributors, and remove repository links and notes from the prior release.
     """
     previous = as_input(draft.get("metadata", {}))
     ours = body["metadata"]
@@ -326,7 +322,7 @@ def find_concept(zenodo: Zenodo, title: str) -> str | None:
 def open_draft(
     zenodo: Zenodo, concept: str | None, body: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Return a new or existing draft, or None if this version is already published."""
+    """Open a draft, or return ``None`` if the version is already published."""
     if concept is None:
         return zenodo.request("POST", "/records", json_body=body)
 
@@ -340,7 +336,7 @@ def open_draft(
                 f"https://doi.org/{record['pids']['doi']['identifier']}"
             )
             return None
-    # Reuse an unpublished draft; it blocks creation of a new version.
+    # Zenodo allows only one open draft per concept.
     for record in versions:
         if not record.get("is_published"):
             return zenodo.request("GET", f"/records/{record['id']}/draft")
@@ -403,15 +399,14 @@ def main() -> None:
         return
     draft_url = f"/records/{draft['id']}/draft"
 
-    # Save the metadata before uploading so retries can find the draft.
+    # Save metadata first so a retry can find this draft.
     saved = zenodo.request("PUT", draft_url, json_body=merge_into_draft(draft, body))
-    # Ignore missing-file errors before uploading.
-    # Report other errors. Zenodo checks them again before publication.
+    # Files are uploaded below; report all other validation errors now.
     for error in saved.get("errors", []):
         if error.get("field") != "files.enabled":
             print(f"Zenodo warning: {error.get('field')}: {error.get('messages')}")
 
-    # Remove inherited files and incomplete uploads before uploading release files.
+    # Replace inherited or incomplete files with this release's artifacts.
     for old in zenodo.request("GET", f"{draft_url}/files").get("entries", []):
         zenodo.request("DELETE", f"{draft_url}/files/{urllib.parse.quote(old['key'])}")
     for path in args.file:

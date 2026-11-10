@@ -21,11 +21,9 @@ classifiers = [
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=1.26",
-    # QanarySnapshotProvider reads an in-memory Zarr store. Qanary also
-    # depends on Zarr.
+    # QanarySnapshotProvider reads Qanary's in-memory Zarr store.
     "zarr>=2.18",
-    # websockets 16 logs a full traceback when a timed-out probe disconnects
-    # before sending a request. Version 17 closes the connection without one.
+    # websockets 17 avoids a traceback when a timed-out probe disconnects.
     "websockets>=17.1,<18",
     "xarray>=2024.1",
 ]
@@ -42,23 +40,19 @@ test = [
     "pytest>=8",
     "pytest-cov>=5",
 ]
-# Install development dependencies with `uv sync --extra dev`. Run
-# `uv run pre-commit install` once per clone.
+# Install with `uv sync --extra dev`, then run `uv run pre-commit install`.
 dev = [
     "pre-commit>=4",
-    # Use the same version here, in .pre-commit-config.yaml, and in the CI
-    # `lint` job. Different versions can produce different formatting.
+    # Keep this version aligned with .pre-commit-config.yaml and CI.
     "ruff==0.16.6",
     "pytest>=8",
     "pytest-cov>=5",
 ]
-# Required by the QCoDeS example and tests. CI installs this extra so the tests
-# use QCoDeS instead of skipping it.
+# The QCoDeS example and provider tests use this extra.
 examples = [
     "qcodes>=0.59.0",
 ]
-# Required by QuantifySnapshotProvider. Its tests use a fake module and do not
-# require this extra.
+# QuantifySnapshotProvider requires this extra; its tests use a fake module.
 quantify = [
     "quantify-core>=0.7",
 ]
@@ -92,15 +86,14 @@ exclude_also = [
 # CI sets the version from commit messages. Do not edit the version manually.
 version_toml = ["pyproject.toml:project.version"]
 commit_message = "chore(release): v{version}\n\n[skip ci]"
-# Without this the release commit is authored by `semantic-release
-# <semantic-release>`, which is not a valid address, so GitLab cannot
-# attribute it. The git identity CI sets does not apply to this commit.
+# Set a valid author for release commits; semantic-release does not inherit the
+# Git identity configured by CI.
 commit_author = "Janitor <squad@fz-juelich.de>"
-# Update CITATION.cff and the README citation; include both in the release commit.
+# Update citation metadata and include it in the release commit.
 build_command = "bash scripts/sync_release_metadata.sh && uv build"
 assets = ["CITATION.cff", "README.md"]
 tag_format = "v{version}"
-# Keep minor releases below 1.0 while the API is unstable.
+# Keep releases below 1.0 while the API is unstable.
 major_on_zero = false
 allow_zero_version = true
 
@@ -109,15 +102,13 @@ allow_zero_version = true
 match = "main"
 prerelease = false
 
-# preview is the release train: it is built and tested, never released. Cutting
-# release candidates from it later only needs this entry to exist.
+# Build and test preview without publishing it.
 [tool.semantic_release.branches.preview]
 match = "preview"
 prerelease = true
 prerelease_token = "rc"
 
-# Without this, python-semantic-release assumes GitHub and every commit link it
-# writes into CHANGELOG.md points at github.com/squad-lab/qimchi-connect -- a 404.
+# Tell semantic-release to generate GitLab commit links.
 [tool.semantic_release.remote]
 type = "gitlab"
 domain = "gitlab.com"
@@ -126,28 +117,25 @@ domain = "gitlab.com"
 exclude_commit_patterns = [
     "^chore\\(release\\):",
     "^ruff update$",
-    # The CI lint job commits its own formatting fixes.
+    # CI formatting commits do not require a release.
     "^style: apply ruff fixes",
 ]
 
 [tool.ruff]
 line-length = 88
 target-version = "py313"
-# The pre-commit formatter receives only Python files. Exclude Markdown so
-# `ruff format .`, pre-commit, and CI check the same files.
+# Match the files formatted by pre-commit and CI.
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
-# E and F are Ruff defaults. I enables import sorting.
+# I adds import sorting to Ruff's default E and F rules.
 select = ["E", "F", "I"]
-# The formatter manages line length. Ignore E501 for content it cannot split,
-# such as long strings and URLs in comments.
+# Let the formatter manage line length; it cannot split every string or URL.
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["qimchi_connect"]
 
-# The repository stores LF. Without this, `ruff format` on Windows rewrites
-# every touched file to CRLF and git re-normalises it on the next commit.
+# Preserve LF line endings when Ruff runs on Windows.
 [tool.ruff.format]
 line-ending = "lf"

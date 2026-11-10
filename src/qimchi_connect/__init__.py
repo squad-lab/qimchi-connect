@@ -1,7 +1,4 @@
-"""
-Package-neutral live xarray-based measurement transport and discovery for Qimchi.
-
-"""
+"""Publish and discover live xarray measurements in Qimchi."""
 
 from qimchi_connect.client import (
     get_live_snapshot,

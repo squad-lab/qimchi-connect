@@ -1,13 +1,3 @@
-"""
-Tests for snapshot cache lifetime and invalidation.
-
-The server keeps one serialized snapshot per measurement for SNAPSHOT_CACHE_TTL
-so that several live plots of one measurement share a single build. The edges
-of that are when a provider is replaced, when it is removed, and when a build
-finishes after either.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -43,11 +33,6 @@ def _snapshot(measurement_id: str) -> dict:
 
 class TestInvalidation:
     def test_replacing_a_provider_is_visible_immediately(self):
-        """
-        A measurement re-registered under the same id inside the TTL must not be
-        answered from the previous provider's snapshot.
-
-        """
         server.register_snapshot_provider(
             "run", lambda: xr.Dataset({"a": ("i", [1.0])})
         )
@@ -103,11 +88,6 @@ class TestRetention:
         ]
 
     def test_closing_a_measurement_releases_its_cached_snapshot(self):
-        """
-        A producer process runs many measurements in a row, so a snapshot left
-        behind by each closed measurement accumulates for the process's lifetime.
-
-        """
         server.register_snapshot_provider(
             "big", lambda: xr.Dataset({"a": ("i", np.zeros(10_000))})
         )
@@ -120,7 +100,6 @@ class TestRetention:
         assert "big" not in server._SNAPSHOT_LOCKS
 
     def test_a_build_finishing_after_a_close_is_not_cached(self):
-        """The result is still returned to its caller; it just is not kept."""
         entered = threading.Event()
         release = threading.Event()
 
@@ -152,7 +131,6 @@ class TestRetention:
         assert "racy" not in server._SNAPSHOT_CACHE
 
     def test_a_request_waiting_for_a_build_finishes_after_close(self, monkeypatch):
-        """A request admitted before close retains the provider it found."""
         entered = threading.Event()
         release = threading.Event()
         admitted = threading.Event()

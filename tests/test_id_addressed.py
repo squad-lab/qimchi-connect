@@ -55,6 +55,17 @@ class TestQanarySnapshotProvider:
         assert first == 3
         assert provider()["signal"].size == 6
 
+    def test_it_reads_a_dict_store_as_qanary_writes_it(self):
+        pytest.importorskip("zarr")
+        store = {}
+        xr.Dataset(
+            {"signal": ("x", np.arange(3.0))}, coords={"x": np.arange(3)}
+        ).to_zarr(store=store, mode="w", zarr_format=2)
+        provider = QanarySnapshotProvider(store)
+
+        assert provider()["signal"].values.tolist() == [0.0, 1.0, 2.0]
+        assert store, "reading must not change the store"
+
     def test_it_describes_itself_as_qanary_zarr(self, store):
         with register_live_measurement("m", QanarySnapshotProvider(store)) as handle:
             entry = server._provider_entry(handle.measurement_id)

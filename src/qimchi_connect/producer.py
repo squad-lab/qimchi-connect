@@ -233,8 +233,8 @@ class QanarySnapshotProvider:
         Wrap an in-memory Zarr store as a live snapshot source.
 
         Args:
-            store (Any): Zarr store the measurement writes into, typically a
-                ``zarr.MemoryStore``.
+            store (Any): Zarr store the measurement writes into. Qanary uses a
+                plain dict, which Zarr treats as an in-memory store.
 
         """
         self._store = store
@@ -247,7 +247,13 @@ class QanarySnapshotProvider:
             xr.Dataset: The measurement as written so far.
 
         """
-        with xr.open_zarr(store=self._store, consolidated=False) as dataset:
+        store = self._store
+        # Copy the dict so this read uses a stable key set while Qanary adds
+        # chunks to the original store.
+        if isinstance(store, dict):
+            store = dict(store)
+        # Disable dask because its setup costs more than this in-memory read.
+        with xr.open_zarr(store=store, consolidated=False, chunks=None) as dataset:
             return dataset.load()
 
 

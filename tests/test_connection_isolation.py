@@ -1,15 +1,3 @@
-"""
-One connection per request.
-
-``send_request`` opens a short-lived connection and closes it with the reply.
-Sharing one socket between requests is not safe: two coroutines awaiting
-``recv()`` on it raise ``cannot call recv while another coroutine is already
-running recv``, and either one's error handling closes the socket out from
-under the other. Qimchi polls several live plots at once, so requests do
-overlap.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +25,6 @@ def endpoint() -> str:
 
 @pytest.fixture
 def connect_calls(monkeypatch) -> list:
-    """Record every connection the client opens."""
     opened: list = []
     real_connect = client.websockets.connect
 
@@ -50,13 +37,6 @@ def connect_calls(monkeypatch) -> list:
 
 
 def test_every_request_opens_its_own_connection(endpoint, connect_calls):
-    """
-    One connection per request is the property that keeps concurrent requests
-    apart, so the count is what this asserts rather than the absence of an
-    error.
-
-    """
-
     async def scenario():
         await asyncio.gather(
             *[client.open_live_measurement("alpha", endpoint) for _ in range(8)]
@@ -68,8 +48,6 @@ def test_every_request_opens_its_own_connection(endpoint, connect_calls):
 
 
 def test_concurrent_requests_all_succeed(endpoint):
-    """Overlapping requests must not contend for a single socket."""
-
     async def scenario():
         return await asyncio.gather(
             *[client.open_live_measurement("alpha", endpoint) for _ in range(12)]
@@ -82,8 +60,6 @@ def test_concurrent_requests_all_succeed(endpoint):
 
 
 def test_concurrent_requests_for_different_measurements_do_not_cross(endpoint):
-    """A shared socket could also reply to the wrong waiter."""
-
     async def scenario():
         requests = []
         for _ in range(6):
@@ -98,13 +74,6 @@ def test_concurrent_requests_for_different_measurements_do_not_cross(endpoint):
 
 
 def test_a_failing_request_does_not_disturb_its_neighbours(endpoint):
-    """
-    One request's failure must not close a socket another is using: on a
-    shared connection that surfaces as ``ConnectionClosedOK`` in a request
-    that had nothing wrong with it.
-
-    """
-
     async def scenario():
         return await asyncio.gather(
             *[client.open_live_measurement("alpha", endpoint) for _ in range(4)],
@@ -123,8 +92,6 @@ def test_a_failing_request_does_not_disturb_its_neighbours(endpoint):
 
 
 def test_mixed_actions_run_concurrently(endpoint):
-    """Every action shares the same connection handling, not just snapshots."""
-
     async def scenario():
         return await asyncio.gather(
             client.list_live_measurements(endpoint),
@@ -144,8 +111,6 @@ def test_mixed_actions_run_concurrently(endpoint):
 
 
 def test_a_connection_is_not_reused_between_requests(endpoint, connect_calls):
-    """Sequential requests each get their own connection too."""
-
     async def scenario():
         for _ in range(3):
             await client.open_live_measurement("alpha", endpoint)

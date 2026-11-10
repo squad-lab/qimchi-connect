@@ -1,13 +1,3 @@
-"""
-Tests for the request actions other than get_snapshot.
-
-``get_data`` and ``get_zarr_array`` are what a consumer uses to inspect a
-measurement's structure, or to pull a single variable, without transferring
-the whole thing. Both the wire path (through the client helpers) and the
-response shaping (through ``_process_request``) matter.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +24,6 @@ def dataset() -> xr.Dataset:
 
 @pytest.fixture
 def published(dataset: xr.Dataset) -> xr.Dataset:
-    """Register the measurement without starting a server, for in-process calls."""
     server.register_snapshot_provider(
         "run-1", lambda: dataset, {"source_package": "test"}
     )
@@ -61,11 +50,6 @@ class TestCapabilities:
         }
 
     def test_it_names_the_framing_and_the_id_field(self):
-        """
-        A client implementing the protocol from `capabilities` has to be told
-        that a snapshot arrives as a binary frame, and what to call the id.
-
-        """
         response = asyncio.run(server._process_request({"action": "capabilities"}))
 
         assert response["snapshot_format"] == "xarray-binary"
@@ -113,9 +97,6 @@ class TestGetData:
         assert set(data) == {"signal"}
 
     def test_a_variable_request_omits_the_producer_metadata(self, published):
-        """
-        ``source`` describes the measurement, so it rides the structure
-        response rather than every value fetch."""
         response = asyncio.run(
             server._process_request(
                 {

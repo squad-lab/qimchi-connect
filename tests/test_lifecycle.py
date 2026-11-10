@@ -1,14 +1,3 @@
-"""
-Tests for publication lifecycle and client error surfacing.
-
-register_live_measurement ties together three pieces of state -- the snapshot
-provider, the WebSocket server and the discovery row -- and any of them can
-fail, or a handle can be used after it is closed. On the client side, a
-server-reported failure has to become an exception rather than an empty result
-the caller mistakes for real data.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -78,8 +67,6 @@ class TestRegistrationFailure:
     def test_a_failed_discovery_write_unregisters_the_provider(
         self, dataset, monkeypatch
     ):
-        """Otherwise the server mis-advertises a measurement."""
-
         def refuse(*args, **kwargs):
             raise sqlite_error()
 
@@ -135,7 +122,6 @@ class TestClientErrorSurfacing:
             asyncio.run(client.get_measurement_data("absent", ["signal"], endpoint))
 
     def test_listing_an_empty_server_returns_nothing(self):
-        """An idle server has no measurements; that is not an error."""
         assert server.start_live_server(port=0)
         endpoint = f"ws://localhost:{server.get_server_port()}"
 

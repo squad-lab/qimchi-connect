@@ -1,7 +1,4 @@
-"""
-Command-line maintenance utilities for the live discovery registry.
-
-"""
+"""Command-line tools for maintaining the discovery registry."""
 
 from __future__ import annotations
 
@@ -17,8 +14,7 @@ def _version() -> str:
     Return the installed package version.
 
     Returns:
-        str: Distribution version, or ``"unknown"`` when the package metadata
-            is not installed, as in a source checkout run without an install.
+        str: Installed version, or ``"unknown"`` without package metadata.
 
     """
     try:

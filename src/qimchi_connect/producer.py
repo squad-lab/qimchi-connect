@@ -1,7 +1,4 @@
-"""
-High-level lifecycle API for publishing live measurements.
-
-"""
+"""Lifecycle API for publishing live measurements."""
 
 from __future__ import annotations
 
@@ -24,18 +21,17 @@ logger = logging.getLogger(__name__)
 _REGISTRATIONS: dict[str, LiveMeasurementRegistration] = {}
 _REGISTRATION_LOCK = threading.RLock()
 
-# One beat covers every measurement this process publishes, so a process
-# running several pays for one thread and one write per interval.
+# One thread sends heartbeats for every measurement published by this process.
 _HEARTBEAT_THREAD: threading.Thread | None = None
 _HEARTBEAT_STOP = threading.Event()
 
 
 def _heartbeat_loop(interval: float) -> None:
     """
-    Stamp every open registration until asked to stop.
+    Send heartbeats for every open registration until stopped.
 
     Args:
-        interval (float): Seconds between rounds.
+        interval (float): Seconds between heartbeat rounds.
 
     """
     while not _HEARTBEAT_STOP.wait(interval):
@@ -45,10 +41,9 @@ def _heartbeat_loop(interval: float) -> None:
             try:
                 registry.heartbeat(measurement_id)
             except Exception:
-                # A registry that cannot be written -- locked, read-only, on a
-                # disconnected share -- must not take the measurement down. The
-                # measurement drops out of the live list, which is what a
-                # consumer would conclude from the missing beats anyway.
+                # Keep serving data if the registry is temporarily unavailable.
+                # Consumers will consider the measurement stale after its
+                # heartbeats expire.
                 logger.warning(
                     "Could not record a heartbeat for %s",
                     measurement_id,
@@ -60,12 +55,12 @@ def _ensure_heartbeat(interval: float) -> None:
     """
     Start the shared heartbeat thread unless it is already running.
 
-    The caller holds ``_REGISTRATION_LOCK``. The first registration in a
-    process sets the cadence for the rest.
+    The caller must hold ``_REGISTRATION_LOCK``. The first registration sets
+    the interval for all registrations in this process.
 
     Args:
-        interval (float): Seconds between rounds. Zero or less publishes
-            without a heartbeat, leaving the measurement to be probed.
+        interval (float): Seconds between heartbeat rounds. A non-positive
+            value disables heartbeats, so consumers must probe the endpoint.
 
     """
     global _HEARTBEAT_THREAD
@@ -86,10 +81,10 @@ def _ensure_heartbeat(interval: float) -> None:
 
 def stop_heartbeat() -> None:
     """
-    Stop the shared heartbeat thread and wait briefly for it.
+    Stop the shared heartbeat thread and wait up to two seconds for it to exit.
 
-    Must not be called while holding ``_REGISTRATION_LOCK``: the thread takes
-    that lock every round, so joining under it deadlocks.
+    Do not call this while holding ``_REGISTRATION_LOCK`` because the heartbeat
+    thread acquires that lock before it exits.
 
     """
     global _HEARTBEAT_THREAD
@@ -104,26 +99,22 @@ class QCoDeSSnapshotProvider:
     """
     Snapshot provider for a running QCoDeS measurement.
 
-    A QCoDeS run needs two things a plain snapshot callback does not provide:
+    QCoDeS requires handling for thread-affine database access and buffered
+    writes:
 
-    1. **Thread affinity.** The run holds a SQLite connection usable only from
-       the thread that opened it -- the measurement thread. A snapshot
-       callback runs on the server's own thread whenever a client asks for
-       data, where reading raises ``sqlite3.ProgrammingError``.
-       ``dataset.cache`` behaves the same way, since it still consults the
-       connection for run metadata. The measurement thread therefore refreshes
-       a cached snapshot, and the server thread only reads that cache, under a
-       lock.
-    2. **Batched writes.** QCoDeS does not flush every ``add_result`` to disk,
-       so even a same-thread read can miss the most recent points until the
-       next flush. ``refresh`` forces a synchronous flush before reading.
+    1. **Thread affinity.** A run's SQLite connection is bound to the
+       measurement thread. The server thread cannot read the run or
+       ``dataset.cache`` without raising ``sqlite3.ProgrammingError``. Instead,
+       the measurement thread refreshes a locked snapshot cache that the server
+       thread can read safely.
+    2. **Buffered writes.** QCoDeS may buffer ``add_result`` calls. ``refresh``
+       flushes pending results before it reads the dataset.
 
-    ``to_xarray_dataset`` re-reads the whole run each time, so refreshing on
-    every point is quadratic in the number of points. ``refresh`` is throttled
-    by ``refresh_interval``; calling it once per point is the intended usage.
+    ``to_xarray_dataset`` reads the entire run, so refreshing after every point
+    has quadratic cost. ``refresh_interval`` limits the refresh rate; callers
+    may still invoke ``refresh`` after each point.
 
-    The datasaver is duck-typed, so ``qcodes`` is never imported here and
-    stays an optional dependency.
+    The datasaver is duck-typed to keep ``qcodes`` optional.
 
     """
 
@@ -156,7 +147,7 @@ class QCoDeSSnapshotProvider:
 
     def refresh(self, *, force: bool = False) -> None:
         """
-        Re-read the run into the cached snapshot. Call from the measurement thread.
+        Refresh the cached snapshot from the measurement thread.
 
         Args:
             force (bool): Refresh even if ``refresh_interval`` has not elapsed.
@@ -167,8 +158,8 @@ class QCoDeSSnapshotProvider:
         if not force and now - self._last_refresh < self._refresh_interval:
             return
 
-        # Both calls touch the run's SQLite connection, so they have to happen
-        # here, on the caller's (measurement) thread -- never in __call__.
+        # Both calls access the thread-bound SQLite connection and must run on
+        # the measurement thread, never in __call__.
         self._datasaver.flush_data_to_database(block=True)
         snapshot = self._datasaver.dataset.to_xarray_dataset()
 
@@ -178,10 +169,10 @@ class QCoDeSSnapshotProvider:
 
     def add_result(self, *results: Any) -> None:
         """
-        Record one point and refresh, so a measurement loop needs one call.
+        Record one point and refresh the snapshot.
 
         Args:
-            *results (Any): Passed straight to ``datasaver.add_result``.
+            *results (Any): Arguments forwarded to ``datasaver.add_result``.
 
         """
         self._datasaver.add_result(*results)
@@ -191,8 +182,8 @@ class QCoDeSSnapshotProvider:
         """
         Seed the cache before the measurement is published.
 
-        Called by ``register_live_measurement`` so a client that connects
-        immediately sees the run so far.
+        ``register_live_measurement`` calls this before publishing the run so
+        the first client receives the current data.
 
         """
         self.refresh(force=True)
@@ -213,12 +204,11 @@ class QanarySnapshotProvider:
     """
     Snapshot provider for a running Qanary measurement.
 
-    Qanary keeps its live data in an in-memory Zarr store that the sweep
-    writes to as it goes. This reads the current contents of that store on
-    every call, so a client always sees the run so far.
+    Qanary writes live data to an in-memory Zarr store. Each call reads the
+    current contents of that store.
 
-    The store is opened and closed per call rather than held open, because the
-    sweep is still writing to it and the read happens on the server's thread.
+    Each call opens and closes the store because Qanary may be writing to it
+    concurrently from another thread.
 
     """
 
@@ -261,15 +251,12 @@ class QuantifySnapshotProvider:
     """
     Snapshot provider for a running Quantify measurement.
 
-    Quantify writes the in-progress dataset to disk as it acquires, and
-    ``load_dataset`` re-reads it, so unlike QCoDeS there is no thread affinity
-    to work around. What this owns is the convention: deriving the measurement
-    id and the on-disk location from a tuid, naming the producer, and covering
-    the window at the start of a run where the file exists but is not yet
-    readable.
+    Quantify writes the dataset to disk during acquisition, and
+    ``load_dataset`` reads it without QCoDeS-style thread restrictions. This
+    provider derives the measurement ID and path from a TUID, identifies the
+    producer, and retains the previous snapshot while the file is unreadable.
 
-    ``quantify_core`` is imported lazily, so the rest of the package stays
-    usable without it.
+    ``quantify_core`` is imported lazily to keep it optional.
 
     Example:
         >>> from quantify_core.data.handling import get_tuids_containing
@@ -324,8 +311,7 @@ class QuantifySnapshotProvider:
         Return the identifier to publish this run under.
 
         Returns:
-            str: The tuid, prefixed so it is recognisable among measurements
-                from other frameworks.
+            str: The TUID prefixed with ``quantify-``.
 
         """
         return f"quantify-{self._tuid}"
@@ -347,8 +333,8 @@ class QuantifySnapshotProvider:
         Return the dataset file Qimchi should fall back to.
 
         Returns:
-            Path | None: The run's ``dataset.hdf5``, or ``None`` while
-                Quantify has yet to create its experiment container.
+            Path | None: The run's ``dataset.hdf5``, or ``None`` before
+                Quantify creates the experiment container.
 
         """
         try:
@@ -360,9 +346,8 @@ class QuantifySnapshotProvider:
         """
         Re-read the run from disk. Safe to call from any thread.
 
-        A read that fails returns the previous snapshot rather than raising:
-        Quantify rewrites the file as it acquires, so a client polling during a
-        write would otherwise see an error instead of the run so far.
+        Return the previous snapshot if a read fails while Quantify rewrites
+        the file during acquisition.
 
         Returns:
             xr.Dataset: The run as last read, empty before the first success.
@@ -385,9 +370,8 @@ class LiveMeasurementRegistration:
     """
     Handle for one published live measurement.
 
-    Returned by :func:`register_live_measurement` and :func:`live_measurement`. Use it
-    to update the advertised disk path; closing it stops publication and marks
-    the discovery record ended.
+    :func:`register_live_measurement` and :func:`live_measurement` return this
+    handle. It updates the advertised disk path and closes the publication.
 
     """
 
@@ -429,13 +413,14 @@ class LiveMeasurementRegistration:
             self._closed = True
             remaining = len(_REGISTRATIONS)
 
-        # Outside the lock: stop_heartbeat joins a thread that takes it.
+        # Release the lock before joining the heartbeat thread because it may
+        # be waiting to acquire the same lock.
         if not remaining:
             stop_heartbeat()
 
     def __enter__(self) -> LiveMeasurementRegistration:
         """
-        Return this active registration to a context manager.
+        Return the active registration.
 
         Returns:
             LiveMeasurementRegistration: This active registration.
@@ -492,11 +477,10 @@ def register_live_measurement(
         port (int): WebSocket port, or zero for an operating-system choice.
         maintain (bool): Whether to reconcile and prune the registry first.
         retention_days (int): Retention period for ended discovery rows.
-        heartbeat_interval (float): Seconds between the stamps that tell
-            consumers this process is still running. Zero or less publishes
-            without one, leaving consumers to probe the endpoint instead. One
-            thread beats for every measurement in the process, so the first
-            publication sets the cadence and later ones inherit it.
+        heartbeat_interval (float): Seconds between registry heartbeats. A
+            non-positive value disables heartbeats, so consumers must probe the
+            endpoint. One thread handles all measurements in the process; the
+            first publication sets the interval.
 
     Returns:
         LiveMeasurementRegistration: Handle used to update or close publication.
@@ -507,9 +491,8 @@ def register_live_measurement(
         ValueError: If an identifier or maintenance argument is invalid.
 
     """
-    # A provider that knows its own framework describes itself: it can name
-    # the producing package and seed its cache before anyone can query it.
-    # A plain callback has neither, and needs neither.
+    # Self-describing providers may supply metadata and prepare an initial
+    # snapshot. Plain callbacks do neither.
     if metadata is None:
         metadata = getattr(snapshot, "metadata", None)
     prepare = getattr(snapshot, "prepare", None)
@@ -522,9 +505,8 @@ def register_live_measurement(
             existing.close()
 
         if maintain:
-            # Housekeeping over rows other runs left behind. A registry that
-            # cannot be swept -- locked, read-only, mid-migration -- must not
-            # stop this measurement from being published.
+            # Registry maintenance is best-effort; a locked, read-only, or
+            # migrating registry must not prevent publication.
             try:
                 result = registry.maintain_registry(retention_days=retention_days)
                 if result.stale_measurement_ids or result.deleted_count:
@@ -574,8 +556,8 @@ def register_live_measurement(
                 registry.DEFAULT_STALE_AFTER,
             )
         if heartbeat_interval > 0:
-            # Stamp before returning, so the measurement never spends its first
-            # interval looking like a producer too old to have a heartbeat.
+            # Write the first heartbeat before returning to avoid an initial
+            # stale interval.
             registry.heartbeat(measurement_id)
             _ensure_heartbeat(heartbeat_interval)
         return registration
@@ -599,10 +581,10 @@ def get_live_registration(measurement_id: str) -> LiveMeasurementRegistration | 
 
 def close_live_measurement(measurement_id: str) -> bool:
     """
-    Stop publishing a measurement, addressed by its identifier.
+    Stop publishing a measurement by identifier.
 
-    Lets a producer that publishes and closes in different places do so
-    without carrying the handle between them.
+    This avoids passing a registration handle between the code that starts and
+    stops publication.
 
     Args:
         measurement_id (str): Identifier to stop publishing.

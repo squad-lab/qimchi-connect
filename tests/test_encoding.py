@@ -1,14 +1,3 @@
-"""
-Tests for the JSON encoding layer of the protocol.
-
-Producer metadata and measurement attrs are arbitrary Python: Qanary writes Path
-objects and timestamps, drivers write NumPy scalars, and complex amplitudes
-appear in the data itself. ``json_compatible`` converts those ahead of time and
-``json_default`` catches whatever reached the encoder unconverted, so both are
-covered here alongside the markers that survive a round trip.
-
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -56,11 +45,6 @@ class TestJsonCompatible:
         assert json_compatible(nested) == {"outer": [{"inner": [1, 2]}]}
 
     def test_the_result_is_directly_encodable(self):
-        """
-        Responses are handed to json.dumps without a second conversion walk, so
-        whatever json_compatible returns has to be encodable as it stands.
-
-        """
         value = json_compatible(
             {
                 "path": Path("/tmp/x"),
@@ -124,11 +108,6 @@ class TestJsonDefault:
             json_default(Opaque())
 
     def test_an_attr_the_producer_left_unconverted_still_encodes(self):
-        """
-        Attrs come from the producer, so a value json_compatible does not know
-        about can still reach json.dumps.
-
-        """
         dataset = xr.Dataset(
             {"v": ("i", [1.0])}, attrs={"when": datetime.date(2026, 1, 2)}
         )
@@ -140,7 +119,6 @@ class TestJsonDefault:
 
 class TestReconstruction:
     def test_a_variable_absent_from_data_is_skipped_rather_than_failing(self):
-        """A truncated snapshot yields a smaller dataset, not an exception."""
         snapshot = {
             "coords": ["x", "missing_coord"],
             "data_vars": ["signal", "missing_var"],

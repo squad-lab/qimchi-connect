@@ -1,15 +1,3 @@
-"""
-Tests for QCoDeSSnapshotProvider.
-
-The class handles two QCoDeS-specific constraints that a plain
-``lambda: dataset.to_xarray_dataset()`` does not: a thread-affine SQLite
-connection, and batched writes that make a naive read return stale data. Most
-tests use a fake datasaver, so they run without qcodes installed and can
-assert on call ordering; the ones at the bottom run against a real QCoDeS
-measurement.
-
-"""
-
 from __future__ import annotations
 
 import threading
@@ -22,13 +10,7 @@ from qimchi_connect import QCoDeSSnapshotProvider, producer
 
 
 class FakeDatasaver:
-    """
-    Stands in for a QCoDeS datasaver, recording the order of calls.
-
-    The order matters -- the provider must flush before it reads -- and is
-    only observable if the sequence is recorded.
-
-    """
+    """Minimal datasaver that records call order."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -57,14 +39,7 @@ class FakeDatasaver:
 
 
 class TestRefreshSemantics:
-    """What refresh() does, and in what order."""
-
     def test_it_flushes_before_reading(self):
-        """
-        QCoDeS batches writes, so reading without flushing first can miss the
-        points just recorded.
-
-        """
         saver = FakeDatasaver()
         provider = QCoDeSSnapshotProvider(saver)
 
@@ -73,7 +48,6 @@ class TestRefreshSemantics:
         assert saver.calls == ["flush(block=True)", "to_xarray_dataset"]
 
     def test_the_flush_blocks(self):
-        """A non-blocking flush would not guarantee the read sees the points."""
         saver = FakeDatasaver()
 
         QCoDeSSnapshotProvider(saver).refresh(force=True)
@@ -92,12 +66,6 @@ class TestRefreshSemantics:
 
 
 class TestThrottling:
-    """
-    to_xarray_dataset re-reads the whole run, so refreshing per point is
-    quadratic. refresh_interval bounds how often that happens.
-
-    """
-
     def test_repeated_refreshes_inside_the_interval_do_no_work(self):
         saver = FakeDatasaver()
         provider = QCoDeSSnapshotProvider(saver, refresh_interval=3600)
@@ -134,8 +102,6 @@ class TestThrottling:
 
 
 class TestSnapshotCallbackIsThreadSafe:
-    """__call__ runs on the server's thread and must never touch the datasaver."""
-
     def test_calling_the_provider_does_not_touch_the_datasaver(self):
         saver = FakeDatasaver()
         provider = QCoDeSSnapshotProvider(saver)
@@ -148,7 +114,6 @@ class TestSnapshotCallbackIsThreadSafe:
         assert saver.calls == []
 
     def test_it_returns_an_empty_dataset_before_the_first_refresh(self):
-        """A client connecting early gets an empty dataset, never an error."""
         assert list(QCoDeSSnapshotProvider(FakeDatasaver())().data_vars) == []
 
     def test_concurrent_readers_and_a_refreshing_writer_never_tear(self):
@@ -181,8 +146,6 @@ class TestSnapshotCallbackIsThreadSafe:
 
 
 class TestAddResult:
-    """The one-call-per-point convenience."""
-
     def test_it_records_the_point_and_refreshes(self):
         saver = FakeDatasaver()
         provider = QCoDeSSnapshotProvider(saver, refresh_interval=0)
@@ -197,7 +160,6 @@ class TestAddResult:
         ]
 
     def test_the_refresh_it_triggers_is_throttled(self):
-        """Per-point calls must not each pay for a full re-read."""
         saver = FakeDatasaver()
         provider = QCoDeSSnapshotProvider(saver, refresh_interval=3600)
 
@@ -209,14 +171,7 @@ class TestAddResult:
 
 
 class TestProducerIntegration:
-    """register_live_measurement should treat a self-describing provider as one."""
-
     def test_it_seeds_the_cache_before_publishing(self):
-        """
-        A client connecting immediately must see the run so far, so the
-        provider is refreshed before the server can be queried.
-
-        """
         saver = FakeDatasaver()
         for _ in range(4):
             saver.add_result()
@@ -247,7 +202,6 @@ class TestProducerIntegration:
             assert entry.metadata["source_package"] == "mine"
 
     def test_a_bare_callable_is_accepted(self):
-        """The provider is opt-in: a bare callable is equally valid."""
         dataset = xr.Dataset({"v": ("i", [1.0, 2.0])}, coords={"i": [0, 1]})
 
         with producer.live_measurement("plain", lambda: dataset) as registration:
@@ -255,16 +209,10 @@ class TestProducerIntegration:
 
 
 class TestAgainstRealQCoDeS:
-    """
-    The thread-affinity constraint, against a real QCoDeS run.
-
-    Skipped when qcodes is not installed; it is an optional extra.
-
-    """
+    """Integration tests against QCoDeS when the extra is installed."""
 
     @staticmethod
     def _run_measurement(tmp_path):
-        """Start a real QCoDeS run and return (datasaver context, instruments)."""
         from qcodes.dataset import (
             Measurement,
             initialise_or_create_database_at,
@@ -289,11 +237,6 @@ class TestAgainstRealQCoDeS:
         return measurement, dac, dmm, Instrument
 
     def test_a_read_from_another_thread_is_refused(self, tmp_path):
-        """
-        QCoDeS refuses a cross-thread read of a running run, which is the
-        constraint the provider works around.
-
-        """
         pytest.importorskip("qcodes")
         measurement, dac, dmm, Instrument = self._run_measurement(tmp_path)
         failure: list[BaseException] = []

@@ -1,13 +1,3 @@
-"""
-Deterministic complexity guardrails for repeated live polling.
-
-A cache miss necessarily reads and frames the complete dataset until the
-revisioned-delta protocol exists. Once that result is cached, however, another
-poll must reuse the payload and binary blob without repeating dataset-sized
-work. These tests count those operations instead of measuring wall-clock time.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +14,6 @@ from qimchi_connect.protocol import PROTOCOL_VERSION
 def test_cached_polls_reuse_one_dataset_sized_build(
     points: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Many cache hits cost one provider call and one serialization in total."""
     dataset = xr.Dataset(
         {"signal": ("point", np.arange(points, dtype=np.float64))},
         coords={"point": np.arange(points, dtype=np.int64)},

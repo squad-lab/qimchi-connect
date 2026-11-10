@@ -1,13 +1,3 @@
-"""
-Tests for concurrent live polling.
-
-Several live plots of one measurement poll the server independently, and the
-server shares a process with the measurement that produces the data. A slow
-snapshot must not block the event loop, concurrent pollers share one snapshot
-build, and each payload is converted once.
-
-"""
-
 import asyncio
 import threading
 import time
@@ -20,7 +10,6 @@ from qimchi_connect import client, protocol, server
 
 
 def _dataset(size: int = 8) -> xr.Dataset:
-    """Build a small gridded dataset shaped like a live sweep."""
     return xr.Dataset(
         {"signal": (("x", "y"), np.random.rand(size, size))},
         coords={"x": np.arange(float(size)), "y": np.arange(float(size))},
@@ -28,7 +17,6 @@ def _dataset(size: int = 8) -> xr.Dataset:
 
 
 def test_slow_snapshot_does_not_block_the_event_loop():
-    """A snapshot in progress must not stall unrelated requests or handshakes."""
     dataset = _dataset()
     started = threading.Event()
 
@@ -56,7 +44,6 @@ def test_slow_snapshot_does_not_block_the_event_loop():
 
 
 def test_concurrent_polls_share_one_snapshot_build():
-    """Pollers arriving together pay for a single serialization, not one each."""
     dataset = _dataset()
     builds = 0
 
@@ -81,7 +68,6 @@ def test_concurrent_polls_share_one_snapshot_build():
 
 
 def test_snapshot_cache_expires():
-    """A cached snapshot must not outlive its TTL, or live plots would freeze."""
     builds = 0
 
     def counting_snapshot() -> xr.Dataset:
@@ -106,7 +92,6 @@ def test_snapshot_cache_expires():
 
 
 def test_serving_a_snapshot_does_not_mutate_the_shared_cache_entry():
-    """Every caller of one cache entry must see the full field set."""
     server.register_snapshot_provider("mixed", _dataset)
 
     async def fetch_twice() -> dict:
@@ -140,12 +125,6 @@ def test_serving_a_snapshot_does_not_mutate_the_shared_cache_entry():
     ],
 )
 def test_payloads_survive_a_single_conversion_pass(values):
-    """
-    Responses are encoded directly, so they must already be JSON-ready.
-    Numeric and boolean dtypes take the binary path instead
-    (protocol.pack_snapshot).
-
-    """
     dataset = xr.Dataset({"v": ("i", values)}, coords={"i": np.arange(len(values))})
     server.register_snapshot_provider("dtypes", lambda: dataset)
 
@@ -159,20 +138,13 @@ def test_payloads_survive_a_single_conversion_pass(values):
         )
     )
 
-    # A successful get_snapshot response is always binary-
-    # framed: the coordinate `i` is int64, so it takes the binary path in every
-    # case regardless of `v`'s dtype. What varies is whether `v` itself rides
-    # the binary payload -- only plain numeric and bool dtypes do; complex,
-    # datetime and object-dtype arrays stay JSON-encoded within the same
-    # message (see snapshot_payload).
+    # The integer coordinate makes every response binary. The variable itself
+    # uses binary only for plain numeric and boolean dtypes.
     binary_payload = response.get("_binary_payload")
     assert binary_payload is not None
     assert (values.dtype.kind in "biuf") == ("v" in response.get("binary_vars", {}))
 
-    # unpack_snapshot re-derives array values only for the binary_vars it
-    # finds; everything else -- including json_default's complex, datetime and
-    # bytes encodings -- passes through the header as json_compatible left it.
-    # One call therefore exercises both decode paths, as a real client does.
+    # One reconstruction covers binary arrays and JSON values in the same frame.
     restored = protocol.measurement_from_snapshot(
         protocol.unpack_snapshot(binary_payload)
     )
@@ -185,7 +157,6 @@ def test_payloads_survive_a_single_conversion_pass(values):
 
 
 def test_connect_and_response_budgets_are_separate():
-    """A slow answer must not be charged against the connection budget."""
     dataset = _dataset()
 
     def slow_snapshot() -> xr.Dataset:
@@ -196,8 +167,7 @@ def test_connect_and_response_budgets_are_separate():
     assert server.start_live_server(port=0)
     endpoint = f"ws://localhost:{server.get_server_port()}"
 
-    # A connect budget far shorter than the snapshot still succeeds, because it
-    # only covers reaching the server.
+    # The connection timeout does not include snapshot generation.
     restored = asyncio.run(
         client.open_live_measurement(
             "patient", endpoint, timeout=10.0, connect_timeout=0.5
@@ -208,7 +178,6 @@ def test_connect_and_response_budgets_are_separate():
 
 
 def test_response_budget_still_bounds_a_hung_server():
-    """A separate connection budget must not remove the ceiling on a poll."""
     server.register_snapshot_provider("stuck", lambda: time.sleep(30) or _dataset())
     assert server.start_live_server(port=0)
     endpoint = f"ws://localhost:{server.get_server_port()}"

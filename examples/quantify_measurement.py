@@ -1,20 +1,15 @@
-"""
-Stream a Quantify measurement to Qimchi while it runs.
+"""Publish a simulated Quantify measurement while it runs.
 
 Run with:  python examples/quantify_measurement.py
 Requires:  pip install "qimchi-connect[quantify]"
 
-The example uses Quantify's MeasurementControl with software-only QCoDeS
-parameters, so it needs no laboratory hardware. While the sweep is running,
-Qimchi's Explorer shows ``quantify-<tuid>`` as a live measurement. When the
-run finishes, Qimchi can fall back to Quantify's ``dataset.hdf5`` file.
+This uses ``MeasurementControl`` with software-only QCoDeS parameters and does
+not require hardware. After the run, Qimchi can load Quantify's
+``dataset.hdf5`` directly.
 
-MeasurementControl creates the TUID inside ``run()``. A small companion
-thread therefore watches Quantify's public data-discovery API for the new run
-and publishes it as soon as its experiment directory appears. The snapshot
-provider reopens the HDF5 dataset on each request, which is safe from the
-WebSocket server thread and resilient to reads that overlap a Quantify write.
-
+``MeasurementControl.run`` creates the TUID, so a background thread discovers
+and publishes the new run. ``QuantifySnapshotProvider`` reopens the HDF5 file
+for each snapshot.
 """
 
 from __future__ import annotations
@@ -35,7 +30,7 @@ from quantify_core.measurement import MeasurementControl
 
 from qimchi_connect import QuantifySnapshotProvider, live_measurement
 
-# Tunables, kept at module scope so tests can shrink the run.
+# Module-level settings let the tests shorten the run.
 EXPERIMENT_NAME = "qimchi_connect_quantify_demo"
 X_VALUES = np.linspace(-1.0, 1.0, 21)
 Y_VALUES = np.linspace(0.0, 2.0, 21)
@@ -121,7 +116,7 @@ def main(data_directory: Path | None = None) -> Path:
             while time.monotonic() < deadline:
                 new_tuids = _known_tuids() - existing_tuids
                 if new_tuids:
-                    # TUIDs begin with a sortable timestamp.
+                    # TUID order matches creation time.
                     tuid = max(new_tuids)
                     provider = QuantifySnapshotProvider(tuid)
                     with live_measurement(

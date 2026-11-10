@@ -1,15 +1,3 @@
-"""
-Examples should run without error.
-
-All are hardware-free -- the QCoDeS one drives QCoDeS' own
-mock instruments and the Quantify one uses software parameters.
-
-Their loops are shrunk through the module-level tunables rather than by
-running the full sweep, so the suite stays fast while still taking the code
-path the example takes.
-
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -25,16 +13,7 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
 
 def load_example(name: str):
-    """
-    Import an example script by path, without needing it on sys.path.
-
-    Args:
-        name (str): File name of the example, including the suffix.
-
-    Returns:
-        Any: The imported module.
-
-    """
+    """Import an example script by filename."""
     path = EXAMPLES / name
     spec = importlib.util.spec_from_file_location(f"_example_{path.stem}", path)
     module = importlib.util.module_from_spec(spec)
@@ -44,11 +23,6 @@ def load_example(name: str):
 
 
 def test_every_example_is_covered_by_a_test():
-    """
-    Every script in examples/ has a test that runs it. A new example is added
-    to this list together with that test.
-
-    """
     tested = {
         "generic_producer.py",
         "qcodes_measurement.py",
@@ -84,11 +58,6 @@ def test_qcodes_measurement_runs(tmp_path, monkeypatch):
 
 
 def test_the_qcodes_example_publishes_what_it_measured(tmp_path, monkeypatch):
-    """
-    The example's purpose is that the live snapshot tracks the run, so check
-    the published data arrived rather than only that the script completed.
-
-    """
     pytest.importorskip("qcodes", reason="qcodes is an optional 'examples' extra")
 
     from qimchi_connect import producer
@@ -114,7 +83,6 @@ def test_the_qcodes_example_publishes_what_it_measured(tmp_path, monkeypatch):
 
 
 def _install_fake_quantify(monkeypatch, tmp_path):
-    """Install the small Quantify surface used by the runnable example."""
     state = {
         "tuids": [],
         "dataset": None,
@@ -134,8 +102,6 @@ def _install_fake_quantify(monkeypatch, tmp_path):
         return state["dataset"].copy(deep=True)
 
     class FakeMeasurementControl:
-        """Exercise the example without installing Quantify's retired stack."""
-
         def __init__(self, _name):
             self.setpoints = None
 
@@ -191,7 +157,6 @@ def _install_fake_quantify(monkeypatch, tmp_path):
 
 
 def test_quantify_measurement_runs_and_publishes(tmp_path, monkeypatch):
-    """The Quantify example should publish its run and return its HDF5 path."""
     state = _install_fake_quantify(monkeypatch, tmp_path)
     module = load_example("quantify_measurement.py")
     monkeypatch.setattr(module, "X_VALUES", np.linspace(0.0, 1.0, 3), raising=True)

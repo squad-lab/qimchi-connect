@@ -1,7 +1,4 @@
-"""
-Background WebSocket server for package-neutral live measurements.
-
-"""
+"""Background WebSocket server for live measurements."""
 
 from __future__ import annotations
 
@@ -58,20 +55,14 @@ def _configured_snapshot_cache_ttl() -> float:
     return ttl
 
 
-# Requests for one measurement arriving within this window share a single
-# build, so two plots polling the same run cost one serialization rather than
-# two. Consumers poll on independent timers -- Qimchi's plots every 750 ms --
-# so a window narrower than the gap between two of them lets each pay in full.
-# Raising it serves data that much older.
+# Requests within this window reuse the same serialized snapshot. A longer TTL
+# reduces serialization work at the cost of older data.
 SNAPSHOT_CACHE_TTL = _configured_snapshot_cache_ttl()
 
 
 @dataclass(frozen=True, slots=True)
 class _ProviderEntry:
-    """
-    One registered snapshot callback and the producer metadata beside it.
-
-    """
+    """Registered snapshot callback and its producer metadata."""
 
     snapshot: SnapshotProvider
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -79,31 +70,22 @@ class _ProviderEntry:
 
 @dataclass(frozen=True, slots=True)
 class _SnapshotCacheEntry:
-    """
-    One measurement's serialized snapshot, reused until its TTL expires.
-
-    """
+    """Cached snapshot for one measurement."""
 
     payload: dict[str, Any]
-    # The binary-framed message body, built once and shared by every waiter
-    # alongside ``payload``.
+    # Framed form of ``payload``, shared by all waiting requests.
     blob: bytes
-    # The dataset both were built from, kept so a client asking for only the
-    # rows it is missing can be answered by slicing this rather than by
-    # reading the producer's store again.
+    # Retained for incremental requests, which slice it without another read.
     dataset: xr.Dataset
     metadata: Mapping[str, Any]
     created: float
-    # Value of _PROVIDER_EPOCH when the snapshot was built. An entry from an
-    # older epoch describes a provider that has since been replaced or removed.
+    # Provider epoch at build time.
     epoch: int
 
 
 _PROVIDERS: dict[str, _ProviderEntry] = {}
 _PROVIDERS_LOCK = threading.RLock()
-# Incremented whenever any provider is registered or removed, so a snapshot
-# build already in flight cannot write its result into the cache under a
-# provider that no longer exists.
+# Incremented on provider changes to reject stale in-flight cache writes.
 _PROVIDER_EPOCH = 0
 
 _SERVER: Any | None = None
@@ -114,24 +96,22 @@ _SERVER_PORT = 0
 _SERVER_ERROR: BaseException | None = None
 _SERVER_READY = threading.Event()
 
-# Read and written from the server's event loop thread, and dropped from the
-# registering thread through _invalidate_snapshot. Locks are stored with the
-# loop they belong to, since a lock cannot be awaited from a different one and
-# callers may drive _process_request on a loop of their own.
+# Cache entries normally belong to the server loop but can be invalidated from
+# a producer thread. Store each asyncio lock with its loop because tests and
+# callers may run _process_request on a different loop.
 _SNAPSHOT_CACHE: dict[str, _SnapshotCacheEntry] = {}
 _SNAPSHOT_LOCKS: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 
 
 def _invalidate_snapshot(measurement_id: str) -> None:
     """
-    Drop a measurement's cached snapshot and open a new provider epoch.
+    Invalidate a measurement's cache and advance the provider epoch.
 
-    Call with ``_PROVIDERS_LOCK`` held, whenever a provider is registered or
-    removed, so the next request rebuilds rather than answering from the
-    previous provider's data.
+    Call while holding ``_PROVIDERS_LOCK`` after registering or removing a
+    provider.
 
     Args:
-        measurement_id (str): Identifier whose cached snapshot is no longer valid.
+        measurement_id (str): Identifier to invalidate.
 
     """
     global _PROVIDER_EPOCH
@@ -151,9 +131,8 @@ def register_snapshot_provider(
     Args:
         measurement_id (str): Stable identifier advertised to live clients.
         snapshot (SnapshotProvider): Callback returning the current
-            measurement as an ``xarray.Dataset``. The server materializes and
-            closes the returned object, so the callback must return a snapshot
-            it can hand over rather than the producer's owned dataset.
+            ``xarray.Dataset``. The server loads and closes it, so the callback
+            must transfer ownership of the returned object.
         metadata (Mapping[str, Any] | None): Optional producer metadata
             included in snapshot responses as ``source``.
 
@@ -205,7 +184,7 @@ def _provider_entry(measurement_id: str) -> _ProviderEntry | None:
 
 
 def _provider_state(measurement_id: str) -> tuple[_ProviderEntry, int] | None:
-    """Return a provider and the epoch in which the request found it."""
+    """Return the provider and current epoch for a new request."""
     with _PROVIDERS_LOCK:
         entry = _PROVIDERS.get(measurement_id)
         if entry is None:
@@ -228,7 +207,7 @@ def _measurement_ids() -> list[str]:
 def _open_provider(
     measurement_id: str, entry: _ProviderEntry
 ) -> tuple[xr.Dataset, Mapping[str, Any]]:
-    """Call a provider retained by an already-admitted request."""
+    """Call the provider retained when a request was accepted."""
     dataset = entry.snapshot()
     if not isinstance(dataset, xr.Dataset):
         raise TypeError(
@@ -262,19 +241,17 @@ def _open_measurement(measurement_id: str) -> tuple[xr.Dataset, Mapping[str, Any
 
 def _row_fields(dataset: xr.Dataset, *, rows_from: int) -> dict[str, Any]:
     """
-    Describe where a snapshot sits along the dimension a sweep grows on.
+    Build incremental-position fields for a snapshot.
 
-    A client stores these beside its copy and asks for ``rows_written``
-    onwards next time, so a run that has already been transferred is not sent
-    again on every poll. A dataset with no shared leading dimension gets no
-    fields, and such a client keeps fetching whole snapshots.
+    Datasets without a shared leading dimension return no row fields and must
+    be transferred in full.
 
     Args:
         dataset (xr.Dataset): Dataset being sent.
         rows_from (int): Index of its first row in the full measurement.
 
     Returns:
-        dict[str, Any]: Row fields to merge into a snapshot payload.
+        dict[str, Any]: Row fields for the snapshot payload.
 
     """
     dim = append_dim(dataset)
@@ -295,20 +272,18 @@ def _partial_snapshot(
     since_rows: int,
 ) -> tuple[dict[str, Any], bytes] | None:
     """
-    Serialize only the rows a client says it is missing.
+    Serialize rows after the client's current offset.
 
     Args:
         measurement_id (str): Identifier the response is for.
         dataset (xr.Dataset): Whole current snapshot to slice.
         metadata (Mapping[str, Any]): Producer metadata for the header.
-        since_rows (int): Rows the client already holds.
+        since_rows (int): Number of rows the client already holds.
 
     Returns:
-        tuple[dict[str, Any], bytes] | None: Payload and framed message for
-            the missing rows, or None when the whole snapshot should be sent
-            instead -- no shared leading dimension, or a client claiming rows
-            this measurement does not have, which means its copy belongs to a
-            different run.
+        tuple[dict[str, Any], bytes] | None: Partial payload and framed message,
+            or ``None`` if the dataset cannot be sliced or the offset exceeds
+            the written data.
 
     """
     dim = append_dim(dataset)
@@ -358,15 +333,13 @@ def _build_snapshot(
     """
     Open a measurement, serialize it, and frame the binary message.
 
-    All three steps are blocking, so this is meant to be called off the event
-    loop. Payload and blob are built from a single open dataset, so they
-    always describe the same state.
+    This blocking function runs outside the event loop. The payload and binary
+    frame come from the same dataset instance.
 
     Args:
         measurement_id (str): Identifier to include in the response.
         provider (_ProviderEntry): Provider retained when the request was
-            admitted. It remains valid if publication closes while this work
-            is waiting for a worker thread.
+            accepted.
 
     Returns:
         tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
@@ -376,9 +349,7 @@ def _build_snapshot(
     """
     dataset, metadata = _open_provider(measurement_id, provider)
     try:
-        # Snapshot callbacks hand ownership of their Dataset to the server.
-        # Materialise lazy backends before closing them so a cached snapshot
-        # never keeps an HDF5/NetCDF file handle open between requests.
+        # Materialize lazy arrays before closing their backing files.
         dataset.load()
     finally:
         dataset.close()
@@ -386,10 +357,8 @@ def _build_snapshot(
     payload = snapshot_payload(dataset, binary=True)
     payload.update(_row_fields(dataset, rows_from=0))
 
-    # The blob's JSON header is a full response, not just the snapshot
-    # fields: the client reads success, the identifier and `source` out of
-    # the unpacked header. The shape does not depend on the request, so it
-    # is built once and cached with the rest.
+    # The binary frame includes the complete response header and can therefore
+    # be cached as-is.
     header = dict(payload)
     header.update(
         success=True,
@@ -409,10 +378,8 @@ async def _cached_snapshot(
     """
     Return a recent snapshot, building at most one per measurement at a time.
 
-    Requests that arrive while a build is in flight wait for it and share its
-    result, so concurrent pollers of one measurement cost a single serialization
-    per cache cycle. A result whose provider changed while it was being built
-    is returned to the caller but not cached.
+    Concurrent requests share one build. If the provider changes during that
+    build, the result is returned to its original caller but not cached.
 
     Args:
         measurement_id (str): Identifier to resolve.
@@ -422,9 +389,8 @@ async def _cached_snapshot(
 
     Returns:
         tuple[dict[str, Any], bytes, xr.Dataset, Mapping[str, Any]]: Snapshot
-            payload, its packed binary message, the dataset both describe, and
-            producer metadata. All are shared between callers and must not be
-            mutated in place.
+            payload, packed message, dataset, and producer metadata. Callers
+            must not mutate these shared objects.
 
     """
     loop = asyncio.get_running_loop()
@@ -445,9 +411,8 @@ async def _cached_snapshot(
         payload, blob, dataset, metadata = await asyncio.to_thread(
             _build_snapshot, measurement_id, provider
         )
-        # Registration changes run on the producer thread. Hold the same lock
-        # across the check and cache write so an invalidation cannot slip
-        # between them and leave a closed provider's snapshot behind.
+        # Keep provider validation and the cache write atomic with respect to
+        # registration changes on producer threads.
         with _PROVIDERS_LOCK:
             if (
                 _PROVIDER_EPOCH == provider_epoch
@@ -532,8 +497,7 @@ def _clear_snapshot_cache() -> None:
     """
     Drop cached snapshots and their per-measurement locks.
 
-    Locks are bound to the event loop that created them, so they must not
-    outlive a server restart.
+    Asyncio locks are bound to their event loop and cannot survive a restart.
 
     """
     _SNAPSHOT_CACHE.clear()
@@ -602,9 +566,8 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
                 "get_zarr_array",
             ],
             "id_field": "measurement_id",
-            # get_snapshot is answered with a single binary frame (see
-            # protocol.pack_snapshot). Every other action, and get_snapshot
-            # error responses, answer with JSON text.
+            # Successful snapshots use one binary frame; other responses use
+            # JSON text.
             "snapshot_format": "xarray-binary",
         }
 
@@ -636,10 +599,8 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
                     payload, blob = partial
             response = _response(measurement_id, success=True, **payload)
             response["source"] = json_compatible(dict(metadata))
-            # _handle_client pops this and sends it as one framed binary
-            # message instead of JSON-encoding the response; see
-            # protocol.pack_snapshot. It covers exactly the variables named
-            # in payload["binary_vars"].
+            # _handle_client sends this frame instead of JSON-encoding the
+            # response.
             response["_binary_payload"] = blob
             return response
 
@@ -691,15 +652,10 @@ async def _handle_client(websocket: ServerConnection) -> None:
                 response = {"success": False, "error": str(exc)}
             binary_payload = response.pop("_binary_payload", None)
             if binary_payload is not None:
-                # protocol.pack_snapshot uses
-                # [header length][JSON header][concatenated arrays]. Sending
-                # `bytes` makes websockets emit a binary frame, which is how
-                # the client picks its decode path.
+                # bytes select the client's binary snapshot decoder.
                 await websocket.send(binary_payload)
             else:
-                # Responses are already JSON-compatible, so they are encoded
-                # directly; ``json_default`` covers anything a provider left
-                # unconverted.
+                # json_default handles any provider values not converted yet.
                 await websocket.send(json.dumps(response, default=json_default))
     except websockets.ConnectionClosed:
         logger.debug("Live WebSocket client disconnected")
@@ -707,11 +663,10 @@ async def _handle_client(websocket: ServerConnection) -> None:
 
 def _reserve_port(host: str) -> int:
     """
-    Choose one free port up front so every address family binds the same one.
+    Reserve one port for every address family resolved from ``host``.
 
-    A host such as ``localhost`` resolves to both ``127.0.0.1`` and ``::1``,
-    and port zero would give each of them a different ephemeral port while
-    only one of them can be advertised.
+    With port zero, IPv4 and IPv6 listeners could otherwise receive different
+    ephemeral ports.
 
     Args:
         host (str): Interface on which the server will listen.
@@ -743,10 +698,7 @@ def _run_server(host: str, port: int) -> None:
     asyncio.set_event_loop(loop)
 
     async def serve() -> None:
-        """
-        Create the WebSocket listener and wait until it closes.
-
-        """
+        """Create the WebSocket listener and wait for it to close."""
         global _SERVER, _SERVER_HOST, _SERVER_PORT
         bind_port = _reserve_port(host) if port == 0 else port
         _SERVER = await websockets.serve(
@@ -754,10 +706,8 @@ def _run_server(host: str, port: int) -> None:
             host,
             bind_port,
             max_size=MAX_MESSAGE_SIZE,
-            # permessage-deflate is on by default. It helps the small JSON
-            # control messages (list, capabilities, errors) but actively hurts
-            # snapshot payloads: raw float64 arrays are already near-maximum
-            # entropy, so keeping compression off.
+            # Numeric snapshot data rarely compresses enough to justify
+            # permessage-deflate overhead.
             compression=None,
         )
         sockets = getattr(_SERVER, "sockets", None) or []

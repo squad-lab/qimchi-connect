@@ -1,12 +1,3 @@
-"""
-Tests for the Qimchi-Connect command-line entry point.
-
-The CLI is a shipped console script, so its argument wiring and its exit
-status are part of the public surface even though the work itself lives in
-qimchi_connect.registry.
-
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -63,12 +54,6 @@ def test_cleanup_reports_the_registry_it_acted_on(monkeypatch, capsys, tmp_path)
 
 
 def test_cleanup_runs_against_the_real_registry(capsys):
-    """
-    End to end, against the real registry rather than a stubbed maintainer.
-    The CLI owes a successful run and a report; the counts themselves are
-    reconciliation policy.
-
-    """
     registry.register_measurement("gone", None, "ws://127.0.0.1:1", 1)
 
     assert cli.main(["cleanup", "--timeout", "0.05", "--retries", "1"]) == 0
@@ -94,7 +79,6 @@ def test_version_is_reported_and_exits_cleanly(capsys):
 
 
 def test_the_version_falls_back_when_the_package_is_not_installed(monkeypatch):
-    """A source checkout run without an install still has a working --version."""
     from importlib.metadata import PackageNotFoundError
 
     def missing(_name):

@@ -22,7 +22,7 @@ authors:
 repository-code: "https://gitlab.com/squad-lab/qimchi-connect"
 doi: 10.5281/zenodo.23536727
 license: AGPL-3.0-or-later
-# Set by semantic-release on every release.
+# Updated by semantic-release.
 version: 0.3.2
 keywords:
   - live plotting

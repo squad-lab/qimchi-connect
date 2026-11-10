@@ -1,7 +1,4 @@
-"""
-WebSocket client for loading package-neutral live measurements.
-
-"""
+"""WebSocket client for live measurements."""
 
 from __future__ import annotations
 
@@ -22,8 +19,7 @@ from qimchi_connect.protocol import (
 
 DEFAULT_WS_URL = "ws://localhost:8765"
 
-# Connections and handshakes are expected to be quick, but serializing
-# a large measurement can take far longer. So, the two timeouts are separate.
+# Keep connection setup on a shorter timeout than snapshot serialization.
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_TIMEOUT = 30.0
 
@@ -67,9 +63,8 @@ async def send_request(
         ws_url,
         max_size=MAX_MESSAGE_SIZE,
         open_timeout=connect_timeout,
-        # The server never offers permessage-deflate (see server.py's
-        # websockets.serve call), so the connection runs uncompressed
-        # either way, also making it faster.
+        # The server disables permessage-deflate, so skip compression
+        # negotiation on the client as well.
         compression=None,
     )
     async with websocket:
@@ -77,10 +72,7 @@ async def send_request(
             await websocket.send(json.dumps(request))
             raw = await websocket.recv()
 
-    # websockets hands back `bytes` for a binary frame and `str` for a text
-    # one, matching what the server sent (see server._handle_client) -- only a
-    # successful get_snapshot response is ever binary, so every other action,
-    # and get_snapshot's own error responses, still take the plain-JSON path.
+    # Successful snapshots use binary frames; all other responses use JSON.
     if isinstance(raw, (bytes, bytearray)):
         response = unpack_snapshot(raw)
     else:
@@ -135,11 +127,9 @@ async def get_live_snapshot(
         ws_url (str): WebSocket endpoint URL.
         timeout (float): Response timeout in seconds.
         connect_timeout (float): Connection and handshake timeout in seconds.
-        since_rows (int | None): Rows the caller already holds. The server
-            answers with the rows beyond that instead of the whole
-            measurement, which is what keeps a long sweep cheap to follow. A
-            server that predates this field ignores it and sends everything,
-            and the response then carries no ``rows_from``.
+        since_rows (int | None): Number of rows already held by the caller.
+            Compatible servers return only later rows. Older servers ignore
+            this value and return a full snapshot without ``rows_from``.
 
     Returns:
         dict[str, Any]: Snapshot response containing xarray structure and data.
@@ -184,17 +174,13 @@ async def open_live_measurement(
         ws_url (str): WebSocket endpoint URL.
         timeout (float): Response timeout in seconds.
         connect_timeout (float): Connection and handshake timeout in seconds.
-        since_rows (int | None): Rows the caller already holds, so only the
-            rows beyond them are fetched.
+        since_rows (int | None): Number of rows already held by the caller.
 
     Returns:
-        xr.Dataset: The measurement, or the rows past ``since_rows`` when the
-            server answered with those. When the server supports incremental
-            snapshots, ``encoding["qimchi_connect_rows"]`` says where the
-            returned rows belong -- ``rows_from``, ``rows_written``,
-            ``rows_total`` and ``append_dim``. A full response then has
-            ``rows_from == 0``. The encoding is absent for older servers and
-            datasets that cannot be split row-wise.
+        xr.Dataset: Full measurement or rows after ``since_rows``. Incremental
+            responses store ``append_dim``, ``rows_from``, ``rows_written``,
+            and ``rows_total`` in ``encoding["qimchi_connect_rows"]``. Older
+            servers and non-row-oriented datasets omit this metadata.
 
     Raises:
         RuntimeError: If the server reports a request failure.

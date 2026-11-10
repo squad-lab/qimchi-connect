@@ -1,15 +1,3 @@
-"""
-Tests for fetching only the rows a consumer is missing.
-
-A sweep preallocates its grid and fills it row by row, so a poller that
-re-fetches the whole measurement every second moves the same bytes over and
-over -- at 16 M points that is 128 MB per refresh, whatever changed. A
-consumer that says how many rows it already holds is answered with the rest,
-and these pin the frontier arithmetic, the fallbacks that send everything
-instead, and the size difference that motivates it.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +14,6 @@ ROWS, COLS = 8, 4
 
 @pytest.fixture
 def half_written() -> xr.Dataset:
-    """A 8x4 grid whose first 5 rows have been measured."""
     values = np.full((ROWS, COLS), np.nan)
     values[:5] = np.arange(5 * COLS, dtype=float).reshape(5, COLS)
     return xr.Dataset(
@@ -100,7 +87,6 @@ class TestPartialSnapshot:
     def test_a_client_claiming_rows_this_run_does_not_have_gets_everything(
         self, published
     ):
-        """Its copy belongs to another run, so its row count means nothing here."""
         response = _snapshot(since_rows=ROWS + 5)
 
         assert response["rows_from"] == 0
@@ -120,16 +106,10 @@ class TestPartialSnapshot:
         assert response["success"] is True
 
     def test_the_rows_left_out_are_not_on_the_wire(self, published):
-        """
-        The saving is the omitted rows' bytes -- the JSON header is the same
-        either way, and only dominates at this toy size. A whole snapshot
-        carries 8 rows, a since_rows=4 one carries the single written row
-        after it, so 7 rows of float64 never leave the producer.
-
-        """
         whole = _snapshot()["_binary_payload"]
         partial = _snapshot(since_rows=4)["_binary_payload"]
 
+        # Seven rows of float64 data are omitted; header size is unchanged.
         assert len(whole) - len(partial) >= 7 * COLS * 8
 
     @pytest.mark.parametrize("since_rows", [-1, True, 1.5, "2"])

@@ -1,10 +1,10 @@
 image: "python:3.13"
 
-# Branch model: feature branches -> preview -> main. Everything is linted and
-# tested on every branch, and preview additionally proves the package still
-# builds. Only a merge to main releases: semantic-release reads the commit
-# messages since the last tag, bumps the version, tags it, and publishes to
-# PyPI plus a matching GitLab Release. There are no release candidates.
+# Branch flow: feature branches -> preview -> main. Every branch is linted and
+# tested; preview also builds the package. Merges to main trigger
+# semantic-release, which determines the version from commit messages, tags the
+# release, and publishes it to PyPI and GitLab. This project has no release
+# candidate stage.
 
 stages:
   - format
@@ -25,22 +25,19 @@ sast:
 secret_detection:
   stage: test
 
-# Fixes what ruff can fix, pushes the result back to the branch, then gates on
-# whatever is left, so a merge request is never blocked on a forgotten
-# `ruff format`.
+# Apply Ruff's automatic fixes, push them to the branch, and then report any
+# remaining lint errors.
 #
-# The commit carries [skip ci], which GitLab honours by creating no pipeline
-# for that push -- without it this job would trigger itself forever. It is the
-# same mechanism semantic-release already uses for its release commit.
+# [skip ci] prevents the automatic-fix commit from starting another pipeline.
+# semantic-release uses the same mechanism for release commits.
 lint:
   stage: format
   before_script:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - source $HOME/.local/bin/env
-    # Pinned to the exact release .pre-commit-config.yaml and pyproject.toml's
-    # `dev` extra use. Bump all three together and do it regularly -- don't
-    # use `ruff@latest` or any of the `*` version specifiers, because a new
-    # release can break the CI.
+    # Keep this version aligned with .pre-commit-config.yaml and the `dev`
+    # extra in pyproject.toml. Avoid floating versions, which can break CI when
+    # Ruff releases an update.
     - uv tool install ruff@0.16.6
     - git config --global user.name "Janitor"
     - git config --global user.email "squad@fz-juelich.de"
@@ -49,27 +46,25 @@ lint:
     # Never rewrite the default branch (merge-only, protected) or a tag.
     - |
       if [ -n "$CI_COMMIT_BRANCH" ] && [ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]; then
-        # CI checks out a detached HEAD; put the branch here so a commit lands on it.
+        # Attach HEAD to the branch so the fix commit is created on that branch.
         git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
-        # Leftovers are the gate's business below -- exiting here would discard
-        # the fixes ruff has already written to disk.
+        # Preserve automatic fixes even when unfixable lint errors remain.
         ruff check --fix . || true
         ruff format .
         if git diff --quiet; then
           echo "Nothing to fix."
         else
           git diff --stat
-          # -u, not -A: never sweep up a cache directory the job created.
+          # Stage tracked files only; the job may have created cache files.
           git add -u
           git commit -m "style: apply ruff fixes [skip ci]"
-          # Never force. If the branch moved while this ran, the rejected push
-          # is the right outcome and the next pipeline fixes the new tip.
+          # Do not overwrite concurrent branch updates. A new pipeline will
+          # process the updated branch after a rejected push.
           git push origin "HEAD:$CI_COMMIT_BRANCH" ||
             echo "WARNING: fixes could not be pushed. Is $CI_COMMIT_BRANCH protected against squad_janitor?"
         fi
       fi
-    # The gate. Formatting can no longer fail it on a branch, because the run
-    # above has already applied it; a real lint error still can.
+    # Fail the job if errors remain after the automatic fixes.
     - ruff check .
     - ruff format --check .
 
@@ -81,8 +76,7 @@ citation:
 
 pytest:
   stage: test
-  # 3.13 is the minimum and recommended runtime. 3.14 stays in the matrix as
-  # the forward-compatibility run.
+  # Python 3.13 is the minimum supported version.
   parallel:
     matrix:
       - PYTHON_VERSION: ["3.13", "3.14"]
@@ -91,12 +85,11 @@ pytest:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - source $HOME/.local/bin/env
   script:
-    # The `examples` extra carries qcodes. Without it every test guarded by
-    # `pytest.importorskip("qcodes")` silently SKIPS -- which is the whole
-    # QCoDeSSnapshotProvider suite and the QCoDeS example.
+    # The `examples` extra installs qcodes. Without it, pytest skips the
+    # QCoDeSSnapshotProvider tests and the QCoDeS example.
     - uv sync --python "$PYTHON_VERSION" --extra test --extra examples
     - uv run --python "$PYTHON_VERSION" pytest --cov --cov-report=term --cov-report=xml --junitxml=report.xml
-  # GitLab reads the total off the pytest-cov terminal summary.
+  # Extract total coverage from pytest-cov's terminal summary.
   coverage: '/^TOTAL.*\s+(\d+%)$/'
   artifacts:
     when: always
@@ -110,15 +103,17 @@ pytest:
     paths:
       - .uv-cache
 
-# Windows behaves differently from Linux, so the recommended Python 3.13
-# runtime gets an additional full test run there. Coverage is reported only
-# from Linux to avoid conflicts.
+# Report coverage only from Linux to avoid duplicate reports.
 pytest-windows:
   stage: test
   tags:
     - windows
+  # The Windows Server 2025 runner requires an ltsc2025 image; the generic
+  # python:3.x image has no compatible manifest. Linux already tests 3.13, so
+  # Windows tests the newest supported version.
+  image: "python:3.14-windowsservercore-ltsc2025"
   variables:
-    PYTHON_VERSION: "3.13"
+    PYTHON_VERSION: "3.14"
   before_script:
     - powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
@@ -136,15 +131,14 @@ pytest-windows:
 
 semantic_release:
   stage: release
-  # Commit-based versioning: the release level comes from the commit messages
-  # since the last tag (fix -> patch, feat -> minor, BREAKING CHANGE -> major).
-  # Commits that do not follow Conventional Commits simply do not trigger a
-  # release, so a change that should ship needs the right prefix.
+  # Derive the release level from commits since the last tag: fix -> patch,
+  # feat -> minor, and BREAKING CHANGE -> major. Other commit formats do not
+  # trigger a release.
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   variables:
-    # semantic-release derives the next version from the commits since the last
-    # tag, so it needs the whole history. GitLab shallow-clones by default.
+    # semantic-release needs the complete history to inspect commits since the
+    # last tag.
     GIT_DEPTH: 0
     GIT_STRATEGY: clone
   before_script:
@@ -153,19 +147,17 @@ semantic_release:
     - git config --global user.name "Janitor"
     - git config --global user.email "squad@fz-juelich.de"
     - git remote set-url origin https://squad_janitor:$CI_FORMAT@$CI_SERVER_HOST/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME
-    # CI checks out a detached HEAD. semantic-release matches the current
-    # branch name against [tool.semantic_release.branches.*] and pushes to it,
-    # so it needs to be on the branch rather than at its commit.
+    # Attach HEAD to the branch so semantic-release can match its branch
+    # configuration and push the release commit.
     - git fetch origin $CI_COMMIT_BRANCH
     - git checkout $CI_COMMIT_BRANCH
     - git reset --hard origin/$CI_COMMIT_BRANCH
     - uv tool install python-semantic-release
   script:
     - |
-      # `version --print-tag` always prints a tag and exits 0 -- with nothing
-      # to release it reprints the last one, so testing for empty output never
-      # fires. Comparing it against the last released tag is what detects the
-      # no-op. On the very first release the last tag is empty and they differ.
+      # `version --print-tag` returns the previous tag when no release is due.
+      # Compare it with the last released tag to detect that case. Before the
+      # first release, the last released tag is empty.
       RELEASE_TAG="$(semantic-release version --print-tag)"
       LAST_TAG="$(semantic-release version --print-last-released-tag)"
       if [ "$RELEASE_TAG" = "$LAST_TAG" ]; then
@@ -175,9 +167,8 @@ semantic_release:
       fi
       echo "RELEASE_CREATED=true" > release.env
       echo "RELEASE_TAG=$RELEASE_TAG" >> release.env
-      # Bumps pyproject.toml, writes CHANGELOG.md, builds, commits, tags and
-      # pushes. GitLab release creation is deliberately handled by the next
-      # job, whose glab client can authenticate correctly with CI_JOB_TOKEN.
+      # Update the version and changelog, build the package, and push the commit
+      # and tag. The next job creates the GitLab Release with CI_JOB_TOKEN.
       semantic-release version --push --changelog --no-vcs-release
   artifacts:
     paths:
@@ -188,10 +179,9 @@ semantic_release:
     reports:
       dotenv: release.env
 
-# Creates a GitLab Release for every version cut above. GitLab's supported
-# CI_JOB_TOKEN flow sends a JOB-TOKEN header; assigning that token to
-# GITLAB_TOKEN instead sends a PRIVATE-TOKEN header and the Releases API
-# returns 404. glab's CI auto-login avoids that subtle half-release failure.
+# Create a GitLab Release for each version above. glab's CI auto-login sends
+# CI_JOB_TOKEN with the required JOB-TOKEN header; assigning it to GITLAB_TOKEN
+# would send the wrong header and cause a 404 response.
 gitlab_release:
   stage: release
   image: registry.gitlab.com/gitlab-org/cli:latest
@@ -208,12 +198,11 @@ gitlab_release:
         echo "semantic-release did not cut a version; no GitLab Release needed."
         exit 0
       fi
-      # glab gives these variables precedence over CI_JOB_TOKEN. Force the
-      # documented job-token login so an unrelated project variable cannot
-      # silently select a stale or under-scoped personal token.
+      # Prevent these variables from overriding CI_JOB_TOKEN with a stale or
+      # under-scoped personal token.
       unset GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
-      # `glab release create` updates an existing Release, which makes a retry
-      # safe if the first attempt created it before the job was interrupted.
+      # This command updates an existing release, so interrupted jobs can retry
+      # safely.
       glab release create "$RELEASE_TAG" \
         --name "Release $RELEASE_TAG" \
         --notes-file CHANGELOG.md \
@@ -236,7 +225,7 @@ zenodo:
         echo "semantic-release did not cut a version; nothing to archive."
         exit 0
       fi
-      # Fetch the release tag created after this pipeline checked out the source.
+      # Fetch the release tag created after this job checked out the source.
       git fetch --tags origin
       ARCHIVE="qimchi-connect-$RELEASE_TAG.zip"
       git archive --format=zip --prefix="qimchi-connect-${RELEASE_TAG#v}/" -o "$ARCHIVE" "$RELEASE_TAG"
@@ -264,9 +253,8 @@ pypi:
       fi
     - uv publish --token "$PYPI_SPANDAN"
 
-# preview is the integration branch, so it is the one place a broken build
-# should surface before it reaches main. On main the build is done by
-# semantic_release instead, against the bumped version.
+# Build the package on the preview integration branch. On main,
+# semantic_release builds it after updating the version.
 build_package:
   stage: release
   rules:

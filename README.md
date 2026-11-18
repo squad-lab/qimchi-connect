@@ -225,6 +225,10 @@ measurement reuse a serialized snapshot for 0.25 seconds. Set
 `QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds; zero disables
 cache hits. Invalid values emit a warning and use the default.
 
+**Protocol specification.** [PROTOCOL.md](PROTOCOL.md) describes the discovery
+registry and WebSocket messages required to implement a compatible producer or
+client without this package.
+
 ## Development
 
 ```console

@@ -66,6 +66,7 @@ class _ProviderEntry:
 
     snapshot: SnapshotProvider
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    append_only: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +125,8 @@ def register_snapshot_provider(
     measurement_id: str,
     snapshot: SnapshotProvider,
     metadata: Mapping[str, Any] | None = None,
+    *,
+    append_only: bool = True,
 ) -> None:
     """
     Register or replace a live measurement snapshot callback.
@@ -135,6 +138,9 @@ def register_snapshot_provider(
             must transfer ownership of the returned object.
         metadata (Mapping[str, Any] | None): Optional producer metadata
             included in snapshot responses as ``source``.
+        append_only (bool): Whether the measurement only appends rows along its
+            leading dimension. If ``False``, the server sends complete
+            snapshots without incremental row metadata.
 
     Raises:
         TypeError: If the identifier is not a string or the snapshot is not
@@ -150,7 +156,9 @@ def register_snapshot_provider(
         raise TypeError("snapshot must be callable")
 
     with _PROVIDERS_LOCK:
-        _PROVIDERS[measurement_id] = _ProviderEntry(snapshot, dict(metadata or {}))
+        _PROVIDERS[measurement_id] = _ProviderEntry(
+            snapshot, dict(metadata or {}), append_only=bool(append_only)
+        )
         _invalidate_snapshot(measurement_id)
 
 
@@ -355,7 +363,8 @@ def _build_snapshot(
         dataset.close()
 
     payload = snapshot_payload(dataset, binary=True)
-    payload.update(_row_fields(dataset, rows_from=0))
+    if provider.append_only:
+        payload.update(_row_fields(dataset, rows_from=0))
 
     # The binary frame includes the complete response header and can therefore
     # be cached as-is.
@@ -591,7 +600,7 @@ async def _process_request(request: dict[str, Any]) -> dict[str, Any]:
             payload, blob, dataset, metadata = await _cached_snapshot(
                 measurement_id, provider, provider_epoch
             )
-            if since_rows is not None and since_rows > 0:
+            if since_rows and provider.append_only:
                 partial = await asyncio.to_thread(
                     _partial_snapshot, measurement_id, dataset, metadata, since_rows
                 )

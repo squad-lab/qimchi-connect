@@ -92,6 +92,16 @@ offset, written row count, and allocated size. Older servers ignore
 `since_rows`, and datasets without a shared leading dimension are always sent
 in full.
 
+Incremental snapshots assume that previously sent rows do not change. If a
+measurement rewrites earlier data—for example, by averaging repeated sweeps
+into the same rows—publish it with `append_only=False`. The server will then
+send complete snapshots without incremental row metadata:
+
+```python
+with live_measurement("experiment-42", snapshot, append_only=False):
+    perform_measurement()
+```
+
 ## Supported frameworks
 
 Framework providers handle details that do not fit a plain callback, such as
@@ -214,6 +224,10 @@ code should use `QCoDeSSnapshotProvider`.
 measurement reuse a serialized snapshot for 0.25 seconds. Set
 `QIMCHI_CONNECT_SNAPSHOT_TTL` to a non-negative number of seconds; zero disables
 cache hits. Invalid values emit a warning and use the default.
+
+**Protocol specification.** [PROTOCOL.md](PROTOCOL.md) describes the discovery
+registry and WebSocket messages required to implement a compatible producer or
+client without this package.
 
 ## Development
 

@@ -405,11 +405,18 @@ class LiveMeasurementRegistration:
         if self._closed:
             return
 
+        end_error: Exception | None = None
         with _REGISTRATION_LOCK:
             if _REGISTRATIONS.get(self.measurement_id) is self:
                 _REGISTRATIONS.pop(self.measurement_id, None)
-                server.unregister_snapshot_provider(self.measurement_id)
-                registry.end_measurement(self.measurement_id)
+                try:
+                    # End the record first, so a client never finds the
+                    # measurement live in the registry but gone from the server.
+                    registry.end_measurement(self.measurement_id)
+                except Exception as exc:
+                    end_error = exc
+                finally:
+                    server.unregister_snapshot_provider(self.measurement_id)
             self._closed = True
             remaining = len(_REGISTRATIONS)
 
@@ -417,6 +424,8 @@ class LiveMeasurementRegistration:
         # be waiting to acquire the same lock.
         if not remaining:
             stop_heartbeat()
+        if end_error is not None:
+            raise end_error
 
     def __enter__(self) -> LiveMeasurementRegistration:
         """
@@ -454,6 +463,7 @@ def register_live_measurement(
     *,
     disk_path: str | Path | None = None,
     metadata: Mapping[str, Any] | None = None,
+    append_only: bool | None = None,
     host: str = "localhost",
     port: int = 0,
     maintain: bool = True,
@@ -473,6 +483,11 @@ def register_live_measurement(
         disk_path (str | Path | None): Optional persisted fallback location.
         metadata (Mapping[str, Any] | None): Optional producer metadata.
             Defaults to the provider's own ``metadata`` when it has one.
+        append_only (bool | None): Whether the measurement only appends rows
+            along its leading dimension. Set to ``False`` if previously written
+            rows can change, for example when averaging repeated sweeps into
+            the same rows. This disables incremental snapshots. Defaults to the
+            provider's ``append_only`` value when available, otherwise ``True``.
         host (str): WebSocket bind host used when starting a server.
         port (int): WebSocket port, or zero for an operating-system choice.
         maintain (bool): Whether to reconcile and prune the registry first.
@@ -495,6 +510,8 @@ def register_live_measurement(
     # snapshot. Plain callbacks do neither.
     if metadata is None:
         metadata = getattr(snapshot, "metadata", None)
+    if append_only is None:
+        append_only = getattr(snapshot, "append_only", True)
     prepare = getattr(snapshot, "prepare", None)
     if callable(prepare):
         prepare()
@@ -523,7 +540,9 @@ def register_live_measurement(
                     exc_info=True,
                 )
 
-        server.register_snapshot_provider(measurement_id, snapshot, metadata)
+        server.register_snapshot_provider(
+            measurement_id, snapshot, metadata, append_only=append_only
+        )
         if not server.is_server_running() and not server.start_live_server(host, port):
             server.unregister_snapshot_provider(measurement_id)
             raise RuntimeError("failed to start the live WebSocket server")

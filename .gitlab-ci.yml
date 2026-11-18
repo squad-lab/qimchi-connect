@@ -79,6 +79,7 @@ pytest:
   # Python 3.13 is the minimum supported version.
   parallel:
     matrix:
+      # TODO: Add 3.15 once h5py (through qcodes) supports Python 3.15
       - PYTHON_VERSION: ["3.13", "3.14"]
   image: "python:${PYTHON_VERSION}"
   before_script:

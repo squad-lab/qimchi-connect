@@ -252,7 +252,7 @@ Please cite Qimchi-Connect when using it in your work:
   author       = {Shivottam, Jyotirmaya and Anupam, Spandan and Mourik, Vincent},
   title        = {Qimchi-Connect: Publish and discover live xarray datasets in Qimchi},
   year         = {2026},
-  note         = {Version 0.4.0, software},
+  note         = {Version 0.4.1, software},
   publisher    = {Zenodo},
   doi          = {10.5281/zenodo.23536727},
   url          = {https://doi.org/10.5281/zenodo.23536727}

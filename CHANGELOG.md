@@ -2,6 +2,35 @@
 
 <!-- version list -->
 
+## v0.4.1 (2026-11-18)
+
+### Bug Fixes
+
+- **ci**: Temporarily exclude Python 3.15 from pytest matrix until h5py support is available
+  ([`43f4753`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/43f4753f6a372c4fb7ac54140320a1f956c2d1ce))
+
+- **lifecycle**: End registrations before removing providers
+  ([`a3a5282`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/a3a52824eba55b77d1505d94af406085183df488))
+
+- **snapshot**: Send full snapshots when rows can change
+  ([`f53088a`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/f53088a3ebf18954b0fab3dca21d764d5d827197))
+
+### Chores
+
+- **lock**: Refresh project metadata
+  ([`e0e0892`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/e0e0892938f2d2e73e9d7a24e079317db844faf5))
+
+### Continuous Integration
+
+- Test Python 3.15
+  ([`da1e0c1`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/da1e0c1d2426a37890459f781a71bef8a5f079ec))
+
+### Documentation
+
+- Document the Qimchi-Connect protocol
+  ([`c02640f`](https://gitlab.com/squad-lab/qimchi-connect/-/commit/c02640f9232254d83960cf5c422b9cfbe6957d87))
+
+
 ## v0.4.0 (2026-11-10)
 
 ### Continuous Integration

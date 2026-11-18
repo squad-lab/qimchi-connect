@@ -79,7 +79,7 @@ pytest:
   # Python 3.13 is the minimum supported version.
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.13", "3.14"]
+      - PYTHON_VERSION: ["3.13", "3.14", "3.15"]
   image: "python:${PYTHON_VERSION}"
   before_script:
     - curl -LsSf https://astral.sh/uv/install.sh | sh

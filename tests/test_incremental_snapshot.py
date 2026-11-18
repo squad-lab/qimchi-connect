@@ -166,3 +166,38 @@ class TestIncrementalClient:
             client.open_live_measurement_sync(
                 "run-1", "ws://localhost:1", since_rows=since_rows
             )
+
+
+class TestRewrittenRows:
+    @pytest.fixture
+    def rewritten(self, half_written: xr.Dataset) -> xr.Dataset:
+        server.register_snapshot_provider(
+            "run-1", lambda: half_written, append_only=False
+        )
+        return half_written
+
+    def test_a_snapshot_carries_no_row_fields(self, rewritten):
+        response = _snapshot()
+
+        assert response["success"] is True
+        assert "append_dim" not in response
+        assert "rows_from" not in response
+
+    def test_asking_from_a_row_returns_every_row(self, rewritten):
+        response = _snapshot(since_rows=3)
+
+        assert "rows_from" not in response
+        rows = unpack_snapshot(response["_binary_payload"])["data"]["signal"]
+        assert np.asarray(rows).shape == (ROWS, COLS)
+
+    def test_an_earlier_row_changed_after_a_fetch_reaches_the_client(self, rewritten):
+        assert server.start_live_server(port=0)
+        endpoint = f"ws://localhost:{server.get_server_port()}"
+        client.open_live_measurement_sync("run-1", endpoint)
+
+        rewritten["signal"][0] = -1.0
+        server._clear_snapshot_cache()
+        again = client.open_live_measurement_sync("run-1", endpoint, since_rows=5)
+
+        assert "qimchi_connect_rows" not in again.encoding
+        np.testing.assert_array_equal(again["signal"].values[0], -1.0)

@@ -85,6 +85,7 @@ members:
 |---|---|
 | `__call__(self) -> xr.Dataset` | Required. Return the run so far. Called from the server's thread, so it must be safe there. |
 | `metadata` | Optional producer identification, used unless the caller passes its own. |
+| `append_only` | Optional. Set to `False` if the framework changes previously written rows. This disables incremental snapshots. The caller can override this value; it defaults to `True`. |
 | `prepare(self)` | Optional. Called by `register_live_measurement` before publication to create the initial snapshot. |
 | `measurement_id`, `disk_path` | Optional values exposed to the caller. They are not read automatically. |
 

@@ -405,11 +405,18 @@ class LiveMeasurementRegistration:
         if self._closed:
             return
 
+        end_error: Exception | None = None
         with _REGISTRATION_LOCK:
             if _REGISTRATIONS.get(self.measurement_id) is self:
                 _REGISTRATIONS.pop(self.measurement_id, None)
-                server.unregister_snapshot_provider(self.measurement_id)
-                registry.end_measurement(self.measurement_id)
+                try:
+                    # End the record first, so a client never finds the
+                    # measurement live in the registry but gone from the server.
+                    registry.end_measurement(self.measurement_id)
+                except Exception as exc:
+                    end_error = exc
+                finally:
+                    server.unregister_snapshot_provider(self.measurement_id)
             self._closed = True
             remaining = len(_REGISTRATIONS)
 
@@ -417,6 +424,8 @@ class LiveMeasurementRegistration:
         # be waiting to acquire the same lock.
         if not remaining:
             stop_heartbeat()
+        if end_error is not None:
+            raise end_error
 
     def __enter__(self) -> LiveMeasurementRegistration:
         """

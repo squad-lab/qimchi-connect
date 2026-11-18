@@ -62,6 +62,48 @@ class TestRegistrationHandle:
             assert registration.ws_port == server.get_server_port()
             assert registration.ws_url.endswith(str(registration.ws_port))
 
+    def test_a_measurement_is_ended_before_it_stops_being_served(
+        self, dataset, monkeypatch
+    ):
+        """Clients must never find it live in the registry but gone from the server."""
+        seen = []
+        unregister = server.unregister_snapshot_provider
+
+        def watching(measurement_id):
+            seen.append(registry.get_measurement(measurement_id).live_status)
+            unregister(measurement_id)
+
+        monkeypatch.setattr(server, "unregister_snapshot_provider", watching)
+
+        producer.register_live_measurement("run", lambda: dataset).close()
+
+        assert seen == [False]
+
+    def test_it_stops_being_served_even_if_ending_it_fails(self, dataset, monkeypatch):
+        registration = producer.register_live_measurement("run", lambda: dataset)
+
+        def locked(_measurement_id, ended_at=None):
+            raise OSError("database is locked")
+
+        monkeypatch.setattr(registry, "end_measurement", locked)
+
+        with pytest.raises(OSError):
+            registration.close()
+        assert "run" not in server._measurement_ids()
+        assert registration._closed is True
+        assert producer.get_live_registration("run") is None
+        assert producer._HEARTBEAT_THREAD is None
+
+        # Its record still says live, but it no longer gets heartbeats, so
+        # clients stop listing it and maintenance ends it.
+        monkeypatch.undo()
+        assert registry.get_measurement("run").live_status is True
+        assert registry.get_live_measurements(stale_after=0.0) == []
+        assert registry.maintain_registry(stale_after=0.0).stale_measurement_ids == (
+            "run",
+        )
+        assert registry.get_measurement("run").live_status is False
+
 
 class TestRegistrationFailure:
     def test_a_failed_discovery_write_unregisters_the_provider(
